@@ -10,12 +10,14 @@ int eft::g_fail = 0, eft::g_pass = 0;
 void dspTests();
 void gridTests();
 void pumpCurvesTests();
+void shapesTests();
 void crossoverTests();
 
 int main() {
     dspTests();
     gridTests();
     pumpCurvesTests();
+    shapesTests();
     crossoverTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);
     return eft::g_fail ? 1 : 0;
