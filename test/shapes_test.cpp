@@ -143,7 +143,8 @@ void shapesAccents() {    // the accent patterns' levels
         CHECK(at("Offbeat Accent", mid) == (i % 4 == 2 ? 1.0f : 0.45f));   // the offbeat eighths, the other 16ths
         CHECK(at("Rolling 16ths", mid) == roll[i % 4]);
         CHECK(at("Shuffle", mid) == shuffle[i % 4]);
-        CHECK(at("Gallop Accent", mid) == (gallop[i] != 'x' ? 0.0f : i == 0 ? 1.0f : 0.6f));   // its first hit 1, the rest
+        // Gallop's open steps; the head of each gallop (steps 0, 4, 8, 12) at 1, the other hits 0.6
+        CHECK(at("Gallop Accent", mid) == (gallop[i] != 'x' ? 0.0f : i % 4 == 0 ? 1.0f : 0.6f));
     }
 }
 

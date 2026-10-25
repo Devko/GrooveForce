@@ -968,10 +968,9 @@ def _gate(name, pattern):
     return _steps(name, [1.0 if c == "x" else 0.0 for c in pattern])
 
 
-def _accent(name, pattern, hit, rest):
-    """The pattern's open steps at `rest`, its first at `hit`."""
-    first = pattern.index("x")
-    return _steps(name, [0.0 if c != "x" else hit if i == first else rest for i, c in enumerate(pattern)])
+def _accent(name, pattern, every, hit, rest):
+    """The pattern's open steps at `rest`, those on every `every`th step (a group's head) at `hit`, the rest 0."""
+    return _steps(name, [0.0 if c != "x" else hit if i % every == 0 else rest for i, c in enumerate(pattern)])
 
 
 SHAPES = [
@@ -988,7 +987,7 @@ SHAPES = [
     # accents: steps at levels rather than on/off
     _steps("Offbeat Accent", [1.0 if i % 4 == 2 else 0.45 for i in range(SHAPE_STEPS)]),
     _steps("Rolling 16ths", [(1.0, 0.55, 0.75, 0.55)[i % 4] for i in range(SHAPE_STEPS)]),
-    _accent("Gallop Accent", dict(GATES)["Gallop"], 1.0, 0.6),
+    _accent("Gallop Accent", dict(GATES)["Gallop"], 4, 1.0, 0.6),   # the eighth that opens each gallop at 1, its two 16ths 0.6
     _steps("Shuffle", [(1.0, 0.3, 0.7, 0.5)[i % 4] for i in range(SHAPE_STEPS)]),
     # random
     dict(name="Random Steps", kind="random_steps"),
