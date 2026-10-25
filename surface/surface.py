@@ -13,6 +13,7 @@ Writes, next to this file:
                      curves, names, options, defaults (the C++ never reads gen_vst's params.h, so
                      `make test` and the .so build need only Python, not the skin toolchain)
   build/factory_presets.h  the factory presets (presets/Factory/*/*.gfp), checked and embedded
+  build/shape_data.h  the shape library (SHAPES), checked: the data dsp/shapes.cpp evaluates
   build/skin_style.json  the palette, knob looks, primary buttons and page groups for
                      skin_polish.py, which `make skin` runs after the generator
 
@@ -922,6 +923,174 @@ constexpr int kNumFactoryPresets = %d;
 """ % (rows, len(presets))
 
 
+# --- the shape library: docs/DESIGN.md "Shape" ---------------------------------------------------
+# Named shapes over one cycle, held as data here and checked here; build/shape_data.h is what
+# dsp/shapes.cpp evaluates. Shape's lanes pick one by name, so the order below is the shape
+# parameters' option list (a saved project stores the choice by index: append, never reorder). Five kinds:
+#   points         breakpoints (x, y, seg, tension): x ascending in [0, 1) from 0, y 0..1. A point's seg is
+#                  the way to the next point; the last runs on to the first one at x = 1, so a shape wraps.
+#                  seg: linear; smooth (a raised cosine); hold (stays at y); curve (an exponential from y to
+#                  the next y, bent by tension -1..1: positive starts slow, negative fast, 0 is a line)
+#   steps          16 levels, one per sixteenth of the cycle (a gate is 1 and 0)
+#   pump           the Pump curve of that name (PUMP_CURVES): 0 at phase 0, recovering across the cycle
+#   random_steps   a level per step drawn from the bar the cycle is in: 16 steps a cycle
+#   random_smooth  4 smooth segments a cycle between drawn levels (dsp/shapes.cpp draws them)
+PUMP_CURVES = ["Smooth", "Soft", "Punch", "Hard", "Snap", "Long", "Late", "Linear", "S-Curve", "Hold"]   # kPumpCurveNames
+SHAPE_COUNT = 38            # a deliberate number: a project stores the shape by its index
+SHAPE_NAME_MAX = 14         # "Offbeat Accent", which the factory presets name: an entry of a popup list
+SHAPE_STEPS = 16
+SHAPE_SEGS = ("linear", "smooth", "hold", "curve")
+SHAPE_KINDS = ("points", "steps", "pump", "random_steps", "random_smooth")
+HARD_EDGE = 0.9999          # a saw or ramp ends on a last point held to the wrap: a hard edge, as the square's
+
+# EffectForce's gate patterns (Pulse::kPatternSteps; 'x' open, '.' closed) except "1/16" (all open) and "Pump".
+GATES = [
+    ("1/8", "x.x.x.x.x.x.x.x."), ("1/4", "x...x...x...x..."), ("Offbeat", "..x...x...x...x."),
+    ("Off 16ths", ".x.x.x.x.x.x.x.x"), ("Dotted", "x..x..x..x..x..x"), ("Tresillo", "x..x..x.x..x..x."),
+    ("Gallop", "x.xxx.xxx.xxx.xx"), ("Rev Gallop", "xxx.xxx.xxx.xxx."), ("Trance 1", "x.xx.xx.x.xx.xx."),
+    ("Trance 2", "xx.xx.x.xx.xx.x."), ("Trance 3", "x.xxx.x.x.xxx.x."), ("Stutter", "x.x.x.x.xxxxxxxx"),
+    ("Half Bar", "xxxxxxxx........"), ("Build", "x...x...x.x.xxxx"),
+]
+
+
+def _points(name, *points):
+    """A points shape; a point is (x, y), (x, y, seg) or (x, y, seg, tension)."""
+    return dict(name=name, kind="points",
+                points=[(float(p[0]), float(p[1]), p[2] if len(p) > 2 else "linear", float(p[3]) if len(p) > 3 else 0.0)
+                        for p in points])
+
+
+def _steps(name, levels):
+    return dict(name=name, kind="steps", levels=[float(v) for v in levels])
+
+
+def _gate(name, pattern):
+    return _steps(name, [1.0 if c == "x" else 0.0 for c in pattern])
+
+
+def _accent(name, pattern, hit, rest):
+    """The pattern's open steps at `rest`, its first at `hit`."""
+    first = pattern.index("x")
+    return _steps(name, [0.0 if c != "x" else hit if i == first else rest for i, c in enumerate(pattern)])
+
+
+SHAPES = [
+    # waves
+    _points("Sine", (0, 0, "smooth"), (0.5, 1, "smooth")),
+    _points("Triangle", (0, 0), (0.5, 1)),
+    _points("Saw Up", (0, 0), (HARD_EDGE, 1, "hold")),
+    _points("Saw Down", (0, 1), (HARD_EDGE, 0, "hold")),
+    _points("Ramp Up", (0, 0, "curve", 0.5), (HARD_EDGE, 1, "hold")),        # a saw, bent: a build that swells late
+    _points("Ramp Down", (0, 1, "curve", -0.5), (HARD_EDGE, 0, "hold")),     # a saw, bent: falls fast, trails off
+    _points("Square", (0, 1, "hold"), (0.5, 0, "hold")),
+    _points("Pulse 25", (0, 1, "hold"), (0.25, 0, "hold")),
+] + [dict(name="Pump " + c, kind="pump", curve=c) for c in PUMP_CURVES] + [_gate(n, p) for n, p in GATES] + [
+    # accents: steps at levels rather than on/off
+    _steps("Offbeat Accent", [1.0 if i % 4 == 2 else 0.45 for i in range(SHAPE_STEPS)]),
+    _steps("Rolling 16ths", [(1.0, 0.55, 0.75, 0.55)[i % 4] for i in range(SHAPE_STEPS)]),
+    _accent("Gallop Accent", dict(GATES)["Gallop"], 1.0, 0.6),
+    _steps("Shuffle", [(1.0, 0.3, 0.7, 0.5)[i % 4] for i in range(SHAPE_STEPS)]),
+    # random
+    dict(name="Random Steps", kind="random_steps"),
+    dict(name="Random Smooth", kind="random_smooth"),
+]
+
+
+def check_shapes(shapes):
+    """A wrong entry fails the build, not the device: names unique and short; points ascending from 0 with y in
+    0..1, a known seg and a tension in -1..1; steps 16 levels in 0..1; the pumps one per PUMP_CURVES entry, in its
+    order, named after the curve; and SHAPE_COUNT entries."""
+    errors, seen = [], set()
+    if len(shapes) != SHAPE_COUNT:
+        errors.append("%d shapes, the library is %d" % (len(shapes), SHAPE_COUNT))
+    for sh in shapes:
+        name = sh.get("name", "")
+        where = "%r" % name
+        if not name or len(name) > SHAPE_NAME_MAX:
+            errors.append("%s: a name of 1..%d characters" % (where, SHAPE_NAME_MAX))
+        if name.lower() in seen:
+            errors.append("%s: the name is taken" % where)
+        seen.add(name.lower())
+        kind = sh.get("kind")
+        if kind not in SHAPE_KINDS:
+            errors.append("%s: kind %r is none of %s" % (where, kind, ", ".join(SHAPE_KINDS)))
+        elif kind == "points":
+            pts = sh["points"]
+            if not pts or pts[0][0] != 0:
+                errors.append("%s: the first point is at x = 0" % where)
+            for i, (x, y, seg, tension) in enumerate(pts):
+                if not 0 <= x < 1:
+                    errors.append("%s: point %d: x = %s is outside [0, 1)" % (where, i, x))
+                if i and x <= pts[i - 1][0]:
+                    errors.append("%s: point %d: x = %s does not ascend" % (where, i, x))
+                if not 0 <= y <= 1:
+                    errors.append("%s: point %d: y = %s is outside 0..1" % (where, i, y))
+                if seg not in SHAPE_SEGS:
+                    errors.append("%s: point %d: seg %r is none of %s" % (where, i, seg, ", ".join(SHAPE_SEGS)))
+                if not -1 <= tension <= 1:
+                    errors.append("%s: point %d: tension = %s is outside -1..1" % (where, i, tension))
+        elif kind == "steps":
+            levels = sh["levels"]
+            if len(levels) != SHAPE_STEPS:
+                errors.append("%s: %d levels, a steps shape has %d" % (where, len(levels), SHAPE_STEPS))
+            if not all(0 <= v <= 1 for v in levels):
+                errors.append("%s: a level is outside 0..1" % where)
+        elif kind == "pump":
+            if sh.get("curve") not in PUMP_CURVES:
+                errors.append("%s: the pump curve %r is none of %s" % (where, sh.get("curve"), ", ".join(PUMP_CURVES)))
+            elif name != "Pump " + sh["curve"]:
+                errors.append("%s: a Pump shape is named after its curve (Pump %s)" % (where, sh["curve"]))
+    pumps = [sh.get("curve") for sh in shapes if sh.get("kind") == "pump"]
+    if pumps != PUMP_CURVES:
+        errors.append("the Pump shapes are one per curve, in the order of PUMP_CURVES (%s), not %s"
+                      % (", ".join(PUMP_CURVES), ", ".join(str(c) for c in pumps)))
+    if errors:
+        raise SystemExit("shapes:\n  " + "\n  ".join(errors))
+
+
+def shape_data_header(shapes):
+    """build/shape_data.h: every points shape's breakpoints and every steps shape's 16 levels (as points held,
+    x = i/16) in one array, and a row per shape saying where its points are."""
+    lines, rows, total = [], [], 0
+    for sh in shapes:
+        first = count = curve = 0
+        pts = []
+        if sh["kind"] == "points":
+            pts = sh["points"]
+        elif sh["kind"] == "steps":
+            pts = [(i / SHAPE_STEPS, v, "hold", 0.0) for i, v in enumerate(sh["levels"])]
+        elif sh["kind"] == "pump":
+            curve = PUMP_CURVES.index(sh["curve"])
+        if pts:
+            first, count = total, len(pts)
+            total += count
+            lines.append("    // %s" % sh["name"])
+            lines += ["    {%sf, %sf, Seg::%s, %sf}," % (repr(x), repr(y), seg.capitalize(), repr(t))
+                      for x, y, seg, t in pts]
+        rows.append("    {%s, ShapeKind::%s, %d, %d, %d}" % (
+            c_str(sh["name"]), "".join(w.capitalize() for w in sh["kind"].split("_")), first, count, curve))
+    return """// generated by surface/surface.py from SHAPES: do not edit
+#pragma once
+#include "../../dsp/shapes.h"
+
+namespace gf {
+
+// Each points shape's breakpoints, each steps shape's 16 levels (held, x = i/16), in shape order.
+inline constexpr ShapePoint kShapePoints[] = {
+%s
+};
+
+// name, kind, the first point and how many (points, steps), the PumpCurve (pump).
+inline constexpr ShapeDef kShapes[] = {
+%s
+};
+inline constexpr int kNumShapes = %d;
+static_assert(sizeof kShapes / sizeof kShapes[0] == kNumShapes, "a row per shape");
+
+} // namespace gf
+""" % ("\n".join(lines), ",\n".join(rows), len(shapes))
+
+
 def check_lock(keys):
     """params.lock: the parameter keys in index order, one per line, the file sd88me's gen_vst.py writes since
     2026-10-21 (their #488), so a later copy of it reads ours as its own. MPC projects, automation lanes and Q-Link
@@ -954,12 +1123,14 @@ def main():
     layout = pages()
     check_layout(layout, build_layout().groups)
     presets = factory_presets()   # everything checked before anything is written
+    check_shapes(SHAPES)
     outputs = [
         ("params.json", json.dumps(params_json(), indent=1)),
         ("layout.conf", layout),
         ("vst.json", json.dumps(VST, indent=1)),
         (os.path.join("build", "skin_style.json"), json.dumps(skin_style(), indent=1)),
         (os.path.join("build", "factory_presets.h"), presets_header(presets)),
+        (os.path.join("build", "shape_data.h"), shape_data_header(SHAPES)),
         (os.path.join("build", "param_ids.h"), header()),   # last: make's target, newer than the rest
     ]
     if lock:
@@ -970,7 +1141,7 @@ def main():
         with open(path + ".tmp", "w", newline="\n", encoding="utf-8") as f:
             f.write(text)
         os.replace(path + ".tmp", path)
-    print("surface: %d parameters, layout ok, %d factory presets" % (len(P), len(presets)))
+    print("surface: %d parameters, layout ok, %d factory presets, %d shapes" % (len(P), len(presets), len(SHAPES)))
 
 
 if __name__ == "__main__":
