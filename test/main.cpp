@@ -11,6 +11,7 @@ void dspTests();
 void gridTests();
 void pumpCurvesTests();
 void shapesTests();
+void transientTests();
 void crossoverTests();
 void shapeTests();
 void pluginTests();
@@ -20,6 +21,7 @@ int main() {
     gridTests();
     pumpCurvesTests();
     shapesTests();
+    transientTests();
     crossoverTests();
     shapeTests();
     pluginTests();
