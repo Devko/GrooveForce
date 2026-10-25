@@ -23,7 +23,8 @@ disagree.
 
 Before writing anything the layout is checked the way shadow_skin.py would, plus geometry and the
 parameter names MPC shows, so a broken page fails here instead of on the device. The layout
-machinery and its checks are MasterForce's, which has them from EffectForce (PolyForce's), unchanged.
+machinery and its checks are MasterForce's, which has them from EffectForce (PolyForce's), with two
+more: at most five page groups, and every option text of a popup or a segment group fits where it is drawn.
 
 Run: python3 surface/surface.py   (make surface does this)
 """
@@ -103,6 +104,8 @@ def popup_flag(of):
 
 readout("status", "Status")            # index 0 must stay a read-only readout: MPC sets it at load. The status line.
 # The whole effect (docs/DESIGN.md "Pages"): the level in and out, and the blend with the unprocessed signal.
+# The parts' parameters (Swing, Pump, Shape) come after the preset browser's, written below the shape library,
+# whose names the lanes' shape lists are.
 num("input", "Input", "lin", -24, 24, 0, "db")
 num("output", "Output", "lin", -24, 24, 0, "db")
 num("mix", "Mix", "lin", 0, 1, 1, "pct")
@@ -163,7 +166,7 @@ def params_json():
 # --- touchscreen pages -------------------------------------------------------------------------
 # EffectForce's look (PolyForce's td3 rounded cards on one flat colour; bg and box the same, so the opaque image of
 # a control never shows a box behind it), in MasterForce's coral. Plugin area 1280x628 at y = 86..714. Every page: a
-# header row (the meters from x=24; the preset stepper right-aligned to x=1256), then cards at y=158 and y=440
+# header row (the status line from x=24; the preset stepper right-aligned to x=1256), then cards at y=158 and y=440
 # (h=270) or one full-height card (h=552). Nothing may sit in a card's title band (y .. y+44: td3 draws the title
 # rule at y+38). skin_polish.py (run by `make skin` after the generator) redraws the knob strips, the trigger
 # buttons and the stepper arrows, and makes the pages of a group sub-pages of one tab.
@@ -196,7 +199,6 @@ KNOB_STYLES = {r - b: {"bipolar": bool(b), "track": 4 if r - b >= 28 else 3, "po
 BIPOLAR_EXTRA = ()                                # every bipolar knob here has a symmetric range
 PRIMARY_BUTTONS = ("pre_save",)                   # drawn in the accent colour by skin_polish.py
 FRAMES = 128                                      # shadow_skin: every filmstrip has 128 frames
-PARAMS = {p["key"]: p for p in P}
 
 
 def bipolar(key):
@@ -235,13 +237,9 @@ class Layout:
     def add(self, line):
         self.lines.append(line + (' when="%s"' % self.when if self.when else ""))
 
-    def header(self, modes=None, status_w=None):
-        """The status line from x=24 and the page-mode selector right-aligned to x=1256."""
-        n = len(PARAMS[modes]["options"]) if modes else 0
-        w = status_w or (1232 - n * 124 - 16 if n else 1232)
-        self.readout(24 + w // 2, 121, w, "status")
-        if n:
-            self.hseg(1256 - (n * 124 - 2) // 2, 121, modes, 122)
+    def header(self, status_w=1232):
+        """The status line from x=24 (the preset stepper goes right-aligned to x=1256 beside a shorter one)."""
+        self.readout(24 + status_w // 2, 121, status_w, "status")
 
     def card(self, x, y, w, h, title):
         self.add('frame x=%d y=%d w=%d h=%d title="%s"' % (x, y, w, h, title))
@@ -270,69 +268,37 @@ class Layout:
     def text(self, cx, top, label):   # bitmap font; top = the top of the glyphs (render_conf_preview.c)
         self.add('text cx=%d cy=%d label="%s" color=%s' % (cx, top, label, TEXT_INK))
 
-    def slider(self, cx, cy, w, h, cw, key):
-        self.add('slider_v cx=%d cy=%d w=%d h=%d cw=%d label="%s" key=%s' % (cx, cy, w, h, cw, PARAMS[key]["name"], key))
-
     def toggle(self, cx, cy, key):
         self.add('toggle cx=%d cy=%d label="%s" key=%s' % (cx, cy, PARAMS[key]["name"], key))
-
-    def meter(self, cx, cy, w, h, key):   # display only: shadow_skin's filmstrip meter, no look (PolyForce patch)
-        self.add('meter cx=%d cy=%d w=%d h=%d key=%s' % (cx, cy, w, h, key))
 
     def tiles(self, x, y, w, cols, rows, th, gap, key):
         self.add('list x=%d y=%d w=%d cols=%d rows=%d th=%d gap=%d key=%s' % (x, y, w, cols, rows, th, gap, key))
 
 
-def on_seg(L, cx, top, key):
-    """A module's Off / On switch, at the left of its card."""
-    L.vseg(cx, top + 160, key, sw=110, label="ON")
-
-
-def hseg_rows(L, cx, cy, key, sw, rows, label):
-    """Segments in `rows` rows, the first centred on cy (shadow_skin enum_h rows=)."""
-    L.add('enum_h cx=%d cy=%d sw=%d rows=%d key=%s label="%s"' % (cx, cy, sw, rows, key, label))
-
-
-def bank(keys, pad=()):
-    """A Q-Link bank: the Force's 8 knobs. The first bank is a page's top card, the second its bottom card;
-    a top card with fewer than 8 controls is filled from `pad` so the bottom card starts on the second bank."""
-    keys = list(keys)
-    for k in pad:
-        if len(keys) >= 8:
-            break
-        keys.append(k)
-    assert len(keys) <= 8, keys
-    return keys
-
-
-def rate_or_div(L, cx, cy, sync, rate, div):
-    """A free rate (or time) knob and its synced division in one place: each shows in its own mode."""
-    L.mode("%s:Free" % sync)
-    L.knob(cx, cy, rate)
-    L.mode("%s:Sync" % sync)
-    L.popup(cx, cy, 170, div)
-    L.mode(None)
-
-
+ON_SW = 64   # an Off | On switch (one segment image size per key: a key drawn twice is drawn alike)
 
 
 def build_layout():
     """Every page, in groups (see Layout). Each page has its own Q-Link set: the Force's 8 knobs show the first 8
-    keys, the next bank the other 8 (shadow_skin qlink_for_slot)."""
+    keys, the next bank the other 8 (shadow_skin qlink_for_slot). Where a page's first 8 keys are one card's, that card
+    is the top one, its controls in the Q-Links' order."""
     L = Layout()
 
-    # GROOVE (docs/DESIGN.md "Pages"): for now one card with the effect's own levels, Input, Output and Mix. The parts
-    # come to this page, and to pages of their own, with their tasks.
+    # GROOVE (docs/DESIGN.md "Pages"): the eight knobs that finish most presets, and the parts' switches with the
+    # grid's swing unit. The echo's knobs and the parts Echo and Time join it with their plans.
     L.group("GROOVE")
-    L.page("GROOVE", ["input", "output", "mix", "preset"])
+    L.page("GROOVE", ["pump_depth", "shape_depth", "swing", "mix", "output", "pump_length", "vol_depth", "flt_depth"])
     L.header(status_w=700)
     L.stepper(998, 121, 516, "preset")
-    L.card(24, R1, 1232, 270, "GROOVE")
-    for cx, k in zip((488, 640, 792), ("input", "output", "mix")):
+    L.card(24, R1, 1232, 270, "KNOBS")
+    for cx, k in zip(S8, ("pump_depth", "shape_depth", "swing", "mix", "output", "pump_length", "vol_depth", "flt_depth")):
         L.knob(cx, R1 + 126, k)
+    L.card(24, R2, 1232, 270, "PARTS AND SWING")
+    L.hseg(S8[1], R2 + 150, "pump_on", ON_SW, label="PUMP")
+    L.hseg(S8[3], R2 + 150, "shape_on", ON_SW, label="SHAPE")
+    L.hseg(S8[6], R2 + 150, "swing_unit", ON_SW, label="SWING UNIT")
 
     # The browser has no knobs of its own: the Q-Links keep the preset stepper and the levels.
-    L.group("PRESETS")
     L.page("PRESETS", ["preset", "input", "output", "mix"])
     L.header()
     L.card(24, R1, 360, 552, "CATEGORIES")
@@ -349,6 +315,69 @@ def build_layout():
     L.button(968, 676, "RND", "rnd")
     L.button(1083, 676, "SAVE", "pre_save")
     L.button(1197, 676, "INIT", "pre_init")
+
+    # PUMP: the top card is the first Q-Link bank, in order; a choice of two or a few is a column of segments, a
+    # long one (the ten curves) a popup list. The second card is the trigger, the target and the switch.
+    L.group("PUMP+SHAPE")
+    L.page("PUMP", ["pump_depth", "pump_length", "pump_curve", "pump_rate", "pump_push", "pump_band", "pump_xover",
+                    "pump_mix", "pump_trigger", "pump_sens", "pump_target", "pump_on"])
+    L.header()
+    L.card(24, R1, 1232, 270, "PUMP")
+    L.knob(S8[0], R1 + 126, "pump_depth")
+    L.knob(S8[1], R1 + 126, "pump_length")
+    L.text(S8[2], R1 + 82, "CURVE")
+    L.popup(S8[2], R1 + 126, 150, "pump_curve")
+    L.vseg(S8[3], R1 + 160, "pump_rate", sw=110, label="RATE")
+    L.knob(S8[4], R1 + 126, "pump_push")
+    L.vseg(S8[5], R1 + 160, "pump_band", sw=110, label="BAND")
+    L.knob(S8[6], R1 + 126, "pump_xover")
+    L.knob(S8[7], R1 + 126, "pump_mix")
+    L.card(24, R2, 1232, 270, "TRIGGER AND TARGET")
+    L.vseg(S8[0], R2 + 160, "pump_trigger", sw=110, label="TRIGGER")
+    L.knob(S8[1], R2 + 126, "pump_sens")
+    L.vseg(S8[2], R2 + 160, "pump_target", sw=110, label="TARGET")
+    L.hseg(S8[3], R2 + 126, "pump_on", ON_SW, label="ON")
+
+    # SHAPE: a card per lane, each with its switch, the shape and rate it plays and the knobs that move it (the
+    # filter adds its type, cutoff and resonance), and a card for the part: its switch, target, depth and mix.
+    # The Q-Links run across the lanes, so the cards are not banks.
+    def lane(x, y, w, p, title):
+        L.card(x, y, w, 270, title)
+        L.hseg(x + 90, y + 92, p + "_on", ON_SW, label="ON")
+        L.text(x + 295, y + 54, "SHAPE")
+        L.popup(x + 295, y + 94, 250, p + "_shape")
+        L.text(x + 495, y + 54, "RATE")
+        L.popup(x + 495, y + 94, 130, p + "_rate")
+        L.knob(x + 100, y + 170, p + "_depth")
+        L.knob(x + 252, y + 170, p + "_phase")
+
+    L.page("SHAPE", ["vol_depth", "vol_shape", "vol_rate", "flt_depth", "flt_shape", "flt_cutoff", "pan_depth",
+                     "pan_shape", "vol_phase", "flt_rate", "flt_reso", "flt_type", "pan_rate", "pan_phase",
+                     "shape_mix", "shape_target"])
+    L.header()
+    lane(24, R1, 608, "vol", "VOLUME")
+    lane(648, R1, 608, "pan", "PAN")
+    lane(24, R2, 816, "flt", "FILTER")
+    L.hseg(24 + 700, R2 + 92, "flt_type", 56, label="TYPE")
+    L.knob(24 + 404, R2 + 170, "flt_cutoff")
+    L.knob(24 + 556, R2 + 170, "flt_reso")
+    L.card(856, R2, 400, 270, "SHAPE")
+    L.hseg(856 + 90, R2 + 92, "shape_on", ON_SW, label="ON")
+    L.hseg(856 + 285, R2 + 92, "shape_target", 56, label="TARGET")
+    L.knob(856 + 100, R2 + 170, "shape_depth")
+    L.knob(856 + 252, R2 + 170, "shape_mix")
+
+    # SETUP (docs/DESIGN.md "Pages"): the levels, and the Pump's detector and crossover. ECHO and TIME come before
+    # it when they exist. The status line is the header's.
+    L.group("SETUP")
+    L.page("SETUP", ["input", "output", "pump_sens", "pump_xover"])
+    L.header()
+    L.card(24, R1, 608, 270, "LEVELS")
+    for cx, k in zip(L4, ("input", "output")):
+        L.knob(cx, R1 + 126, k)
+    L.card(648, R1, 608, 270, "PUMP")
+    for cx, k in zip(R4, ("pump_sens", "pump_xover")):
+        L.knob(cx, R1 + 126, k)
     return L
 
 
@@ -370,9 +399,12 @@ def skin_style():
 # seg_rects, popup_layout) and render_conf_preview.c (the bitmap font of `text`).
 X0, Y0, X1, Y1 = 0, 86, 1280, 714
 TITLE_BAND = 44              # a card's title band: y .. y+44
+MAX_GROUPS = 5               # tab groups: all MPC's tab strip shows without a pager
 NAME_MAX = 13                # MPC shows a knob/slider's effGetParamName at ~19.5 px in a 130 px box
 MAX_IMAGE_H = 16384          # taller skin images draw wrongly (sd88me/mpc-vst-plugins catalog_check.py warns)
 POP_ROW, POP_GAP, POP_PAD, POP_GROUP_ROWS = 40, 2, 6, 8
+LIVE_PX, POP_ARROW = 26, 44   # a popup's closed field: live text 26 px in the field minus its arrow (shadow_skin)
+FIELD_PAD = 8                 # and the text keeps this much clear of the field's edge
 BITMAP_GLYPHS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-/_>%+:#"   # font8x8.h font_chars
 BITMAP_ADVANCE = {" ": 4, "J": 9, "j": 9, ".": 9, "-": 9, ":": 9}   # font_glyph_width(): last lit column + 2; else 10
 INT_KEYS = ("x", "y", "w", "h", "cx", "cy", "r", "sw", "rows", "cols", "th", "gap", "cw")
@@ -602,6 +634,26 @@ def check_names(layout_tabs, geo, errors):
                 errors.append("%s: %s %s: name %r does not fit its %d px label" % (tab["name"], w["kind"], w["key"], name, box))
 
 
+def option_fit(w, options):
+    """What of a popup's or a segment group's option texts is too wide for where it is drawn, as shadow_skin draws
+    it: the closed popup's field shows the pick in the live face (LIVE_PX px) in the field minus the arrow; an open
+    list's cells and the segments hold it in the title face, centred, 42% of the cell's height tall."""
+    out = []
+    for o in options:
+        if w["kind"] == "popup":
+            room = w["w"] - POP_ARROW - FIELD_PAD
+            if ttf_width(LIVE_FONT, LIVE_PX, o) > room:
+                out.append("%r is wider than the field (%d px of text, %d px of room)" % (o, ttf_width(LIVE_FONT, LIVE_PX, o),
+                                                                                           room))
+            cell_w, cell_h = w["w"], POP_ROW
+        else:
+            cell_w, cell_h = w.get("sw") or (135 if w["kind"] == "enum_v" else 117), 30 if w["kind"] == "enum_v" else 33
+        px = max(10, int(cell_h * 0.42))
+        if ttf_width(TITLE_FONT, px, o) > cell_w - 8:
+            out.append("%r is wider than its %d px cell (%d px of text at %d px)" % (o, cell_w, ttf_width(TITLE_FONT, px, o), px))
+    return out
+
+
 def check_layout(text, groups):
     """Raise SystemExit on anything shadow_skin.py would refuse, plus geometry mistakes: outside the plugin
     area, overlaps on one screen (a page mode with everything shown in every mode), controls or text in a
@@ -625,8 +677,8 @@ def check_layout(text, groups):
             tabs[-1]["qlinks"].append((m.group(1), keys))
             continue
         tabs[-1]["widgets"].append(_widget(line))
-    if len(groups) > 7:
-        errors.append("%d page groups: MPC's tab strip shows five plus a pager; keep it to seven" % len(groups))
+    if len(groups) > MAX_GROUPS:
+        errors.append("%d page groups: MPC's tab strip shows five without a pager; keep it to %d" % (len(groups), MAX_GROUPS))
     errors += ["page group %s has no pages" % g["name"] for g in groups if not g["pages"]]
     grouped, names = [n for g in groups for n in g["pages"]], [t["name"] for t in tabs]
     if grouped != names:
@@ -718,6 +770,8 @@ def check_layout(text, groups):
                 panel = Geometry.popup_panel(w, len(p["options"]))
                 if not _inside(panel):
                     errors.append("%s: popup %s: its open list %s leaves the plugin area" % (T, key, panel))
+            if kind in ("popup", "enum_h", "enum_v"):
+                errors += ["%s: %s %s: %s" % (T, kind, key, bad) for bad in option_fit(w, p["options"])]
             for r in geo.rects(w, params):
                 placed.append((r, "%s %s" % (kind, key), mode))
         for i, (r, what, mode) in enumerate(placed):
@@ -748,7 +802,8 @@ def check_layout(text, groups):
 
 # --- C++ header --------------------------------------------------------------------------------
 CURVE = {"readout": "Readout", "enum": "Enum", "lin": "Lin", "log": "Log", "int": "Int", "pow": "Pow"}
-FMT = {"none": "None", "enum": "Enum", "pct": "Percent", "db": "Db", "dbtp": "DbTp", "text": "Text"}
+FMT = {"none": "None", "enum": "Enum", "pct": "Percent", "spct": "SignedPercent", "db": "Db", "ms": "Ms", "hz": "Hz",
+       "text": "Text"}
 KIND = {"synth": "Synth", "ui": "Ui", "readout": "Readout", "stepper": "Stepper", "button": "Button", "tile": "Tile",
         "toggle": "Toggle", "popup": "Popup"}
 
@@ -783,7 +838,7 @@ enum ParamId : int {
 };
 
 enum class Curve : unsigned char { Readout, Enum, Lin, Log, Int, Pow };
-enum class Fmt : unsigned char { None, Enum, Percent, Db, DbTp, Text };
+enum class Fmt : unsigned char { None, Enum, Percent, SignedPercent, Db, Ms, Hz, Text };
 // Who owns the value and what a set does: see surface.py "kind".
 enum class Kind : unsigned char { Synth, Ui, Readout, Stepper, Button, Tile, Toggle, Popup };
 
@@ -993,6 +1048,61 @@ SHAPES = [
     dict(name="Random Steps", kind="random_steps"),
     dict(name="Random Smooth", kind="random_smooth"),
 ]
+
+
+# --- the parts' parameters: docs/DESIGN.md "The parts" ----------------------------------------------
+# Appended after the preset browser's (a project stores a parameter by its index), but written here because the
+# lanes' shape lists are the names of SHAPES. A choice of many options is a popup list, so its hidden "__open"
+# flag follows it. Everything is off or at rest by default: Init passes the input through bit for bit.
+ON_OFF = ["Off", "On"]
+TARGETS = ["All", "Dry", "Echo"]       # what a part acts on: the whole signal, the dry, or the Echo's wet only
+PUMP_RATES = ["1/16", "1/8", "1/4", "1/2", "1 bar"]                                                           # kPumpRates
+SHAPE_RATES = ["1/16", "1/8T", "1/8", "1/4T", "1/8.", "1/4", "1/4.", "1/2", "1/2.", "1 bar", "2 bars", "4 bars"]   # kShapeRates
+SHAPE_NAMES = [sh["name"] for sh in SHAPES]
+LANES = (("vol", "Volume"), ("flt", "Filter"), ("pan", "Pan"))
+
+# the grid: one swing for every part (50% is straight)
+num("swing", "Swing", "lin", 0.5, 0.75, 0.5, "pct")
+enum("swing_unit", "Swing Unit", ["1/16", "1/8"], "1/16")
+
+# Pump: the duck on every step of the grid (or every hit of the input)
+enum("pump_on", "Pump", ON_OFF, "Off")
+enum("pump_rate", "Pump Rate", PUMP_RATES, "1/4")
+enum("pump_curve", "Pump Curve", PUMP_CURVES, "Smooth")
+popup_flag("pump_curve")
+num("pump_depth", "Pump Depth", "lin", 0, 1, 0, "pct")
+num("pump_length", "Pump Length", "lin", 0.05, 1, 0.6, "pct")
+num("pump_push", "Pump Push", "lin", -10, 30, 0, "ms")
+enum("pump_trigger", "Pump Trigger", ["Grid", "Input"], "Grid")
+num("pump_sens", "Sensitivity", "lin", 0, 1, 0.5, "pct")
+enum("pump_band", "Pump Band", ["Full", "Lows", "Highs"], "Full")
+num("pump_xover", "Crossover", "log", 60, 300, 120, "hz")
+enum("pump_target", "Pump Target", TARGETS, "All")
+num("pump_mix", "Pump Mix", "lin", 0, 1, 1, "pct")
+
+# Shape: three lanes, each on its own (volume, filter, pan), each moved along a named shape
+enum("shape_on", "Shape", ON_OFF, "Off")
+num("shape_depth", "Shape Depth", "lin", 0, 1, 1, "pct")
+enum("shape_target", "Shape Target", TARGETS, "All")
+num("shape_mix", "Shape Mix", "lin", 0, 1, 1, "pct")
+for lane, name in LANES:
+    enum(lane + "_on", name, ON_OFF, "Off")
+for lane, name in LANES:
+    enum(lane + "_shape", name + " Shape", SHAPE_NAMES, "Sine")
+    popup_flag(lane + "_shape")
+for lane, name in LANES:
+    enum(lane + "_rate", name + " Rate", SHAPE_RATES, "1/4")
+    popup_flag(lane + "_rate")
+num("vol_depth", "Volume Depth", "lin", 0, 1, 0, "pct")              # the volume never boosts: 0..1
+num("flt_depth", "Filter Depth", "lin", -1, 1, 0, "spct")            # the filter and the pan move both ways
+num("pan_depth", "Pan Depth", "lin", -1, 1, 0, "spct")
+for lane, name in LANES:
+    num(lane + "_phase", name + " Phase", "lin", 0, 1, 0, "pct")
+enum("flt_type", "Filter Type", ["LP", "BP", "HP"], "LP")
+num("flt_cutoff", "Cutoff", "log", 20, 20000, 20000, "hz")
+num("flt_reso", "Resonance", "lin", 0, 1, 0, "pct")
+
+PARAMS = {p["key"]: p for p in P}   # every parameter is declared: the layout and its checks look them up by key
 
 
 def check_shapes(shapes):
