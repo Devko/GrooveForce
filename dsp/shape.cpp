@@ -16,8 +16,12 @@ constexpr float kMaxHz = 0.45f * ef::kRate;
 constexpr double kMinRate = 0.0625, kMaxRate = 64.0;   // beats a cycle
 
 // The most a value moves a sample: the shape's value a full scale in 1 ms (so no edge is steeper than
-// 1 ms). And in a chunk: the controls a full scale in 10 ms, a cutoff 10 octaves in 10 ms.
+// 1 ms). The pan law turns the value's step into a gain's up to sqrt2 pi/2 = 2.22 times as big (a = pi/4 p,
+// p = 2 y - 1, g = cos a -+ sin a), so the Pan lane's value moves that much slower: its gains obey the 1 ms
+// rule too, and a sweep from one side to the other takes 2.2 ms. In a chunk: the controls a full scale in
+// 10 ms, a cutoff 10 octaves in 10 ms.
 constexpr float kShapeSlope = 1.0f / (0.001f * ef::kRate);
+constexpr float kPanSlope = kShapeSlope / 2.22144147f;
 constexpr float kFadeStep = ef::kChunk / (0.010f * ef::kRate);
 constexpr float kOctaveStep = 10.0f * kFadeStep;
 
@@ -226,7 +230,7 @@ void Shape::process(float* L, float* R, int n) {
             x = x * ef::splat2(1.0f - vc.at(i) * (1.0f - vy));
         }
         if (pan) {
-            py = approach(py, ps.at(i), kShapeSlope);
+            py = approach(py, ps.at(i), kPanSlope);
             const float a = kQuarterPi * (pc.at(i) * (2.0f * py - 1.0f));   // the angle from the middle
             const float sn = ef::sinQuarter(a), cs = cosSmall(a), m = pm.at(i);
             // sqrt2 cos(pi/4 + a) = cos a - sin a, sqrt2 sin(pi/4 + a) = cos a + sin a

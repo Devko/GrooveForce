@@ -26,9 +26,12 @@
 // step are all 1 ms ramps, never faster, on every lane, the filter's too (a gate on the cutoff cannot move
 // it four octaves inside a chunk). The middle of an edge lands within half a millisecond of its place on
 // the grid. (The filter lane runs the same limiter over the chunk in set(), and its cutoff glides to where
-// the value is at the chunk's end.) The limit is on the value: Volume's gain moves d times a full scale per
-// millisecond at most; the pan law bends it, and a full sweep from one side to the other moves a side's gain
-// by sqrt2 in that 1 ms, at most 2.2 times the unit slope.
+// the value is at the chunk's end.) The rule is for the gains: Volume's gain moves at most d times a full
+// scale per millisecond. The pan law steepens the value by up to sqrt2 pi/2 = 2.22 (a side's gain
+// moves sqrt2 over a sweep from one side to the other), so the Pan lane's value is limited that much
+// harder, and a full sweep takes 2.2 ms: its gains stay within the 1 ms rule too. Only while depth,
+// amount, mix or a lane's on/off fade (10 ms) move at the same time can a gain's step pass it, by at most
+// 0.11 of the rule.
 //
 // What the controls change goes through slopes too: depth, amount, mix, a lane switched on or off
 // (a fade of 10 ms), the resonance, the filter type (a blend of LP, BP and HP weights) and the cutoff

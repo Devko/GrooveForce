@@ -431,6 +431,27 @@ void shapeEdges() {
     Buf L(44100, 1.0f), R(44100, 1.0f);
     render(half, L, R, transport(120.0, 0.0, true));
     CHECK(steepest(L) <= 0.5 * kSlope * 1.001 + 1e-6 && steepest(L) >= 0.5 * kSlope * 0.99);
+
+    // The Pan lane's gains (L and R on DC 1) obey the same rule: the pan law steepens the value by up to
+    // sqrt2 pi/2 = 2.22, so the lane limits its value that much harder (a full sweep takes 2.2 ms).
+    double hardestPan = 0.0;
+    for (int s = 0; s < gf::numShapes(); ++s)
+        for (double rate : {0.25, 4.0})
+            for (float depth : {1.0f, -1.0f}) {
+                P p;
+                Shape::LaneParams& q = p.lane[Shape::kPan];
+                q.on = true;
+                q.shape = s;
+                q.rateBeats = rate;
+                q.depth = depth;
+                Buf pl(3 * 44100, 1.0f), pr(3 * 44100, 1.0f);
+                render(p, pl, pr, transport(120.0, 0.0, true));
+                const double step = std::max(steepest(pl), steepest(pr));
+                hardestPan = std::max(hardestPan, step);
+                CHECK(step <= kSlope * 1.001 + 1e-6);
+                if (!(step <= kSlope * 1.001 + 1e-6)) std::printf("  pan %s at %g beats: %.5f a sample, the limit is %.5f\n", gf::shapeName(s), rate, step, kSlope);
+            }
+    CHECK(hardestPan >= kSlope * 0.9);   // and a hard pan does use it
 }
 
 // Stopped, the cycle runs on at the tempo from where it was; starting to play doesn't click.
@@ -553,8 +574,8 @@ void shapeTempoChange() {
 }
 
 // Loud noise through every lane at the ends of every field, past them, and NaN in: finite, and no
-// louder than 16 times the input (resonance 1 is a Q of 12, and the pan's sqrt2 on top). With no lane
-// on nothing runs and the buffers are left alone, NaN and all.
+// louder than 17 times the input (resonance 1 is a Q of 12, and the pan's sqrt2 on top: 16.97, which a
+// sine at the cutoff reaches). With no lane on nothing runs and the buffers are left alone, NaN and all.
 void shapeExtremes() {
     uint32_t s = 5;
     auto flip = [&s] { return (ef::xorshift(s) & 1u) != 0; };
@@ -613,8 +634,21 @@ void shapeExtremes() {
     }
     CHECK(finite);
     CHECK(untouched);
-    CHECK(worst <= 16.0);
-    if (!(worst <= 16.0)) std::printf("  loudest: %.2f times the input\n", worst);
+    CHECK(worst <= 17.0);
+    if (!(worst <= 17.0)) std::printf("  loudest: %.2f times the input\n", worst);
+
+    // The worst case there is: a 2 kHz sine at the cutoff of an LP at resonance 1 (gain Q = 12) with the Pan
+    // lane holding a full side (sqrt2). Its peak is 16.97 times the input's: more than the 16 of noise.
+    P loud = with(Shape::kFilter, "Sine", 1.0, 0.0f);
+    loud.cutoffHz = 2000.0f;
+    loud.resonance = 1.0f;
+    lane(loud, Shape::kPan, "Square", 16.0, 1.0f);   // v 1 for the first 8 beats: p +1
+    const Buf tone = sine(2000.0, 44100, 0.25f);
+    Buf a = tone, b = tone;
+    render(loud, a, b, transport(120.0, 0.0, true));
+    const double ratio = std::max(peak(a), peak(b)) / peak(tone);
+    CHECK(ratio <= 17.0 && ratio > 16.0);
+    if (!(ratio <= 17.0 && ratio > 16.0)) std::printf("  a sine at the cutoff: %.3f times the input\n", ratio);
 }
 
 // New, random parameters (out of range, NaN) and transport every chunk: finite, and bounded.
@@ -658,7 +692,7 @@ void shapeRandomJumps() {
         m.process(&L[i], &R[i], static_cast<int>(std::min<size_t>(kChunk, L.size() - i)));
     }
     CHECK(allFinite(L) && allFinite(R));
-    CHECK(std::max(peak(L), peak(R)) <= 16.0f * std::max(peak(inL), peak(inR)));
+    CHECK(std::max(peak(L), peak(R)) <= 17.0f * std::max(peak(inL), peak(inR)));
 }
 
 // Random Steps under a 1-bar MPC loop: every bar plays the bar's pattern, the first one's. (At 122.5
@@ -704,8 +738,8 @@ void shapeNoClicks() {
             m.set(p, transport(120.0, i * 2.0 / kRate, true));
             m.process(&L[i], &R[i], kChunk);
         }
-        // Volume: the gain. Pan: the gains are at most 2.3 x the limit (the angle moves p by twice the value's step).
-        const double bound = (l == Shape::kVolume ? 1.12 : 2.5) * kSlope;
+        // The limit, plus the 10 ms fade's slope (at most 0.11 of it, for the Pan's sqrt2 pi/4 too).
+        const double bound = 1.12 * kSlope;
         CHECK(steepest(L) <= bound && steepest(R) <= bound);
         if (!(steepest(L) <= bound)) std::printf("  lane %d on and off: %.5f a sample\n", l, steepest(L));
     }
