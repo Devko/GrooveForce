@@ -34,7 +34,7 @@ MV       := third_party/mpc-vst-plugins
 SURF     := surface
 SURF_OUT := $(SURF)/build
 SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveForce
-GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h
+GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h
 SKIN     := $(SURF_OUT)/skin.stamp
 
 SRC      := $(wildcard dsp/*.cpp) $(wildcard plugin/*.cpp)
@@ -110,18 +110,21 @@ $(BUILD)/arm/gf_test: $(TESTS) $(THDR) $(SRC) $(HDR) $(GEN)
 
 # One module's tests on their own: make test-module M=grid builds
 # test/grid_test.cpp with dsp/grid.cpp (if there is one), under ASan/UBSan; test-module-arm
-# the same for the Force's CPU under qemu-arm. (EffectForce's.)
+# the same for the Force's CPU under qemu-arm. (EffectForce's.) A module that calls another's code
+# (shapes evaluates the Pump curves) lists that code in MOD_DEPS_<module>; the generated headers
+# (shape_data.h) come from INC, and from make surface.
 M ?=
-MOD_SRC = test/module_main.cpp test/$(M)_test.cpp $(wildcard dsp/$(M).cpp)
-test-module: | $(BUILD)
+MOD_DEPS_shapes := dsp/pump_curves.cpp
+MOD_SRC = test/module_main.cpp test/$(M)_test.cpp $(wildcard dsp/$(M).cpp) $(MOD_DEPS_$(M))
+test-module: $(GEN) | $(BUILD)
 	@[ -n "$(M)" ] || { echo "usage: make test-module M=<module>"; exit 1; }
 	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -Wall -Wextra \
-		-DMODULE_TESTS=$(M)Tests $(MOD_SRC) -o $(BUILD)/$(M)_test
+		$(INC) -DMODULE_TESTS=$(M)Tests $(MOD_SRC) -o $(BUILD)/$(M)_test
 	$(BUILD)/$(M)_test
-test-module-arm:
+test-module-arm: $(GEN)
 	@[ -n "$(M)" ] || { echo "usage: make test-module-arm M=<module>"; exit 1; }
 	mkdir -p $(BUILD)/arm
-	$(ARM_CXX) -std=c++17 $(ARM_OPT) -Wall -Wextra -Wno-psabi -DMODULE_TESTS=$(M)Tests $(MOD_SRC) -o $(BUILD)/arm/$(M)_test
+	$(ARM_CXX) -std=c++17 $(ARM_OPT) -Wall -Wextra -Wno-psabi $(INC) -DMODULE_TESTS=$(M)Tests $(MOD_SRC) -o $(BUILD)/arm/$(M)_test
 	$(ARM_RUN) $(BUILD)/arm/$(M)_test
 
 # x86 numbers say nothing about the Force; this only checks the bench and the .so path work.
