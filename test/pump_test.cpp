@@ -516,7 +516,7 @@ std::vector<int> beatSamples(F transportAt, size_t total, double bpm) {
 
 void pumpFollowsJumps() {   // a locate from beat 3.3 to 9.8, then a loop of 1.5 beats: the next bottom on the grid, no click
     const P p = hardPump();
-    const size_t locate = 32 * 2274, total = 16 * kBeat;   // the locate at beat 3.30013 (120 BPM), 3.3 s in
+    const size_t locate = 32 * 2274, total = 16 * kBeat;   // the locate at beat 3.30013 (120 BPM), 1.65 s in
     const double loopFrom = 12.0, loopLen = 1.5;
     const auto transportAt = [&](size_t pos) {
         if (pos < locate) return playingAt(120.0, static_cast<double>(pos) / kBeat);
@@ -698,7 +698,7 @@ struct Rng {
     bool coin() { return next() & 1u; }
 };
 
-void pumpExtremes() {   // every Params field at both ends and past them, NaN and 1e30 in the input: finite, never above the input's level
+void pumpExtremes() {   // every Params field at both ends and past them, NaN and 1e30 in the input: finite; Full never above the input, banded within 3x its peak
     const float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
     Rng r;
     bool finite = true, bounded = true;
@@ -755,23 +755,63 @@ void pumpExtremes() {   // every Params field at both ends and past them, NaN an
         render(p, L, R, t);
         finite = finite && allFinite(L) && allFinite(R);
         const bool full = p.band != Pump::kLows && p.band != Pump::kHighs;
-        float peakIn = 0.0f;
-        for (const Buf* x : {&inL, &inR})
-            for (float v : *x)
-                if (std::isfinite(v)) peakIn = std::max(peakIn, std::fabs(v));
+        // The input's level is that of the samples the filters keep (svf.h's safeIn: |x| <= 1e8). The
+        // spikes (NaN, infinity, 1e30) are hostile input, not level: a banded Pump zeroes them in the
+        // split, and the plain path (depth 0, a fade) passes them at their own sample only.
+        const auto kept = [](float v) { return std::fabs(v) <= 1e8f; };   // (false for NaN)
+        float peakIn = 0.0f, peakOutL = 0.0f, peakOutR = 0.0f;
+        for (size_t i = 0; i < L.size(); ++i) {
+            if (kept(inL[i])) {
+                peakIn = std::max(peakIn, std::fabs(inL[i]));
+                peakOutL = std::max(peakOutL, std::fabs(L[i]));
+            }
+            if (kept(inR[i])) {
+                peakIn = std::max(peakIn, std::fabs(inR[i]));
+                peakOutR = std::max(peakOutR, std::fabs(R[i]));
+            }
+        }
         if (full) {   // sample by sample, never louder than the input
             for (size_t i = 0; i < L.size(); ++i) {
                 if (std::isfinite(inL[i])) bounded = bounded && std::fabs(L[i]) <= std::fabs(inL[i]);
                 if (std::isfinite(inR[i])) bounded = bounded && std::fabs(R[i]) <= std::fabs(inR[i]);
             }
-        } else {   // an allpass moves the waveform: 2x the input's peak
+        } else {   // the split's allpass moves the waveform and can raise a peak: by up to 3x on a square (pumpBandPeaks)
             ++banded;
-            bounded = bounded && peak(L) <= 2.0f * peakIn && peak(R) <= 2.0f * peakIn;
+            bounded = bounded && peakIn > 10.0f && peakOutL <= 3.0f * peakIn && peakOutR <= 3.0f * peakIn;
         }
     }
     CHECK(finite);
     CHECK(bounded);
     CHECK(banded > 50);
+}
+
+// The banded Pump splits through an allpass while the split is live (any depth over 0), and an allpass
+// moves the waveform: an edgy one can come out with higher peaks. A full-scale square wave is the worst
+// case there is: about 2.9x its peak (+9 dB), with the crossover below the square's fundamental. The
+// bound is 3x, at a depth that barely ducks and at full depth.
+void pumpBandPeaks() {
+    const int n = 32 * 1500;
+    for (const double hz : {120.0, 200.0}) {
+        Buf in(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i) {
+            const double phase = hz * i / ef::kRate;
+            in[static_cast<size_t>(i)] = phase - std::floor(phase) < 0.5 ? 1.0f : -1.0f;
+        }
+        for (const float depth : {1e-4f, 1.0f})
+            for (const int band : {static_cast<int>(Pump::kLows), static_cast<int>(Pump::kHighs)}) {
+                P p;
+                p.curve = gf::PC_SNAP;
+                p.depth = depth;
+                p.band = band;
+                p.crossoverHz = hz == 120.0 ? 60.0f : 120.0f;
+                Buf L = in, R = in;
+                render(p, L, R, playingAt(120.0, 0.0));
+                CHECK(allFinite(L) && allFinite(R) && same(L, R));
+                CHECK(peak(L) <= 3.0f * peak(in));
+                if (!(peak(L) <= 3.0f * peak(in)))
+                    std::printf("  %.0f Hz square, crossover %.0f Hz, depth %g, band %d: peak %.3f x the input's\n", hz, p.crossoverHz, depth, band, peak(L) / peak(in));
+            }
+    }
 }
 
 void pumpBlockSizes() {   // chunks of 1, 7, 32: the same output as 32 (within 1e-6)
@@ -978,6 +1018,7 @@ void pumpTests() {
     pumpTempoChange();
     pumpShortestSteps();
     pumpExtremes();
+    pumpBandPeaks();
     pumpBlockSizes();
     pumpNoClicks();
     pumpBandSwitch();

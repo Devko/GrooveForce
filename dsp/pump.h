@@ -36,7 +36,9 @@
 // something is ducked: at depth 0 (or mix 0) the Pump leaves the audio alone, bit for bit, and takes
 // the crossover out with a 10 ms crossfade (the split's allpass phase differs from the input's). The
 // crossover's cutoff follows the knob through a one-pole on log frequency (20 ms): a one-chunk
-// leap across the range would swell a tone near it.
+// leap across the range would swell a tone near it. The split is an allpass in the path while it is
+// live (at any depth over 0): it can raise the peaks of an edgy waveform, by up to about +9 dB on a
+// full-scale square wave.
 //
 // Depth and mix glide (two 5 ms one-poles); band, trigger, curve, length, rate, push and swing
 // changes take the level's slope limiter or a 10 ms crossfade. reset() forgets everything and the next
