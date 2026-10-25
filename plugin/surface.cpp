@@ -22,6 +22,7 @@ constexpr int kMaxAutomatePerBlock = 48;   // spread big refreshes over a few bl
 constexpr float kQuant             = 0.0015f;   // MPC rounds values to 1/1000
 constexpr long long kGestureMs     = 300;   // sends closer than this belong to one gesture
 constexpr float kFirstMoveMax      = 0.16f; // a gesture's first event is a turn, not a jump
+constexpr const char* kInitKey     = "builtin:Init";   // the INIT button's preset, and what a new instance is
 
 // A stepper's 0..1 range: one item per 1/1023, or per 1/(items-1) for longer lists.
 int stepperRange(int items) { return std::max(kStepperRange, items - 1); }
@@ -83,6 +84,9 @@ Surface::Surface() : texts_(P_COUNT) {
         lastN_[i] = -1.0f;
     }
     presetLibrary().rescan();   // a new instance sees the preset files as they are now
+    // A new instance is Init (every parameter at its default), so the stepper stands on it, wherever Init sorts.
+    // The browser keeps to its first category instead of following it there.
+    presetKey_ = followed_ = kInitKey;
     refresh();
 }
 
@@ -182,7 +186,7 @@ void Surface::apply(int i, float n) {
                 const int pick = clampi(cur + (i == P_PRESET_NEXT ? 1 : -1), 0, std::max(items - 1, 0));
                 if (pick != cur) loadPreset(L->items[static_cast<size_t>(pick)].key);   // the ends: nothing to load
             }
-            if (i == P_PRE_INIT) loadPreset("builtin:Init");
+            if (i == P_PRE_INIT) loadPreset(kInitKey);
             if (i == P_PRE_SAVE) savePreset();
             if (i == P_CAT_PREV || i == P_CAT_NEXT || i == P_ITEM_PREV || i == P_ITEM_NEXT || i == P_RND) browserAction(i);
             break;
