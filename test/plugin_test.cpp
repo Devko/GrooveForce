@@ -8,6 +8,7 @@
 // state, the redraws, suspend and resume, and that nothing hostile gets out. The tests that need the
 // chain (pumpThroughMpc, suspendResume while pumping, the stress with the DSP) come with it.
 #include "host.h"
+#include "../plugin/presets.h"
 #include "../plugin/surface.h"
 
 #include <cstdio>
@@ -423,6 +424,7 @@ void presetsRoundTrip() {
     std::ofstream(fixtureDir() + "/presets/User/User 003.gfp")
         << "grooveforce 1\nswing=0.7\nno_such_key=5\npump_curve=Wobble\npump_rate=1 bar\nvol_depth=oops\n";
     Host g;
+    g.press(P_PRE_INIT);   // a new instance's stepper stands at the first item, which is no longer Init
     g.press(P_PRESET_NEXT);   // Init -> User 001 -> User 002 -> User 003
     g.press(P_PRESET_NEXT);
     g.press(P_PRESET_NEXT);
@@ -430,6 +432,142 @@ void presetsRoundTrip() {
     CHECK(g.display(P_SWING) == "70%" && g.display(P_PUMP_RATE) == "1 bar");
     CHECK(g.display(P_PUMP_CURVE) == "Smooth" && g.display(P_VOL_DEPTH) == "0%");   // what it didn't name is the default
     freshUserPresets();
+}
+
+// A beat for the factory presets to work on: two bars at 120 BPM (4 s) of a kick on every beat, a bass note a beat,
+// hats on every sixteenth with the offbeats louder, and a detuned-saw chord a bar. Stereo; peaks at -1 dBFS.
+void beat(Buf& L, Buf& R) {
+    const size_t n = 2 * 4 * 22050;
+    L.assign(n, 0.0f);
+    R.assign(n, 0.0f);
+    const double chords[2][3] = {{220.0, 261.6, 329.6}, {174.6, 220.0, 261.6}};
+    const double bass[2] = {55.0, 43.65};
+    uint32_t seed = 1;
+    double hatLp = 0.0;
+    float top = 0.0f;
+    for (size_t i = 0; i < n; ++i) {
+        const double t = static_cast<double>(i) / 44100.0;
+        const int bar = static_cast<int>(t / 2.0);
+        const double inBar = t - bar * 2.0, inBeat = std::fmod(t, 0.5), inStep = std::fmod(t, 0.125);
+        const double env = std::min(1.0, inBar / 0.01) * (inBar < 1.8 ? 0.7 + 0.3 * std::exp(-inBar * 4.0) : (2.0 - inBar) / 0.2);
+        double cl = 0.0, cr = 0.0;
+        for (int v = 0; v < 3; ++v) {
+            cl += 2.0 * std::fmod(t * chords[bar][v] * 1.003, 1.0) - 1.0;
+            cr += 2.0 * std::fmod(t * chords[bar][v] * 0.997 + 0.3, 1.0) - 1.0;
+        }
+        const double kick = 0.5 * std::sin(2.0 * kPi * (50.0 * inBeat + 70.0 / 25.0 * (1.0 - std::exp(-inBeat * 25.0)))) *
+                            std::exp(-inBeat * 18.0);
+        const double sub = (std::fmod(t * bass[bar], 1.0) < 0.5 ? 0.12 : -0.12) * std::exp(-inBeat * 6.0);
+        seed = seed * 1664525u + 1013904223u;
+        const double hn = static_cast<double>(static_cast<int32_t>(seed)) / 2147483648.0;
+        hatLp += 0.5 * (hn - hatLp);
+        const bool off = static_cast<int>(t / 0.125) % 4 == 2;
+        const double hat = (off ? 0.09 : 0.05) * (hn - hatLp) * std::exp(-inStep * 120.0);
+        L[i] = static_cast<float>(0.06 * env * cl + sub + kick + hat);
+        R[i] = static_cast<float>(0.06 * env * cr + sub + kick + hat * 0.9);
+        top = std::max(top, std::max(std::fabs(L[i]), std::fabs(R[i])));
+    }
+    for (size_t i = 0; i < n; ++i) {
+        L[i] *= 0.89f / top;
+        R[i] *= 0.89f / top;
+    }
+}
+
+// How far the output is from the input: the rms of the difference against the rms of the input, both channels, in dB.
+double changeDb(const Buf& inL, const Buf& inR, const Buf& outL, const Buf& outR) {
+    double diff = 0.0, sig = 0.0;
+    for (size_t i = 0; i < inL.size(); ++i) {
+        const double a = static_cast<double>(outL[i]) - inL[i], b = static_cast<double>(outR[i]) - inR[i];
+        diff += a * a + b * b;
+        sig += static_cast<double>(inL[i]) * inL[i] + static_cast<double>(inR[i]) * inR[i];
+    }
+    return db(std::sqrt(diff / std::max(sig, 1e-30)));
+}
+
+// Every line of a preset's text is in the parameters (an option by its name, a number to its precision), and
+// everything it doesn't name is at its default.
+bool landed(Host& h, const std::string& text) {
+    std::istringstream in(text);
+    std::string line;
+    std::getline(in, line);   // the header
+    std::vector<bool> named(P_COUNT, false);
+    bool ok = true;
+    while (std::getline(in, line)) {
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string key = line.substr(0, eq), val = line.substr(eq + 1);
+        int id = -1;
+        for (int i = 0; i < P_COUNT; ++i)
+            if (PARAM_INFO[i].kind == Kind::Synth && key == PARAM_INFO[i].key) id = i;
+        bool here = false;
+        if (id >= 0) {
+            named[static_cast<size_t>(id)] = true;
+            if (PARAM_INFO[id].nopts > 0) {
+                for (int o = 0; o < PARAM_INFO[id].nopts; ++o)
+                    here = here || (val == PARAM_INFO[id].opts[o] && std::lround(h.value(id)) == o);
+            } else {
+                const double v = std::strtod(val.c_str(), nullptr);
+                here = std::fabs(static_cast<double>(h.value(id)) - v) <= 1e-4 * std::max(1.0, std::fabs(v));
+            }
+        }
+        if (!here) std::printf("  not in place: %s\n", line.c_str());
+        ok = ok && here;
+    }
+    for (int i = 0; i < P_COUNT; ++i)
+        if (PARAM_INFO[i].kind == Kind::Synth && !named[static_cast<size_t>(i)] && std::fabs(h.get(i) - PARAM_INFO[i].def) > 2e-5f) {
+            std::printf("  not at its default: %s\n", PARAM_INFO[i].key);
+            ok = false;
+        }
+    return ok;
+}
+
+// Every factory preset, loaded by the browser's arrows on a fresh instance: it is what its file says, and on the beat at
+// 120 BPM with the transport running it stays a number under +18 dBFS and changes the sound (the rms of the difference
+// to the input above -40 dB re the input). Init is the one that doesn't: the input, bit for bit.
+void factoryPresets() {
+    std::printf("== the factory presets\n");
+    freshUserPresets();
+    // The first set, by category folder (presets/Factory/NN_Category): later ones are checked by the loop below too.
+    static const struct { const char* category; const char* name; } kFirst[] = {
+        {"Bass", "Bass Pump"},          {"Bass", "Hard Pump"},         {"Bass", "Double Pump"},      {"Bass", "Offbeat Gate"},
+        {"Hats + Perc", "Hat Accents"}, {"Hats + Perc", "Hat Shuffle"}, {"Chords", "Chord Gate Pump"}, {"Chords", "Filter Pump"},
+        {"Drum Bus", "Low Pump"},       {"Utility", "Init"}};
+    std::vector<int> factory;   // the listing's built-ins, in the order the arrows walk them
+    int items = 0;
+    {
+        presetLibrary().rescan();   // the folders as they are now (no user presets)
+        const auto lst = presetLibrary().listing();
+        items = static_cast<int>(lst->items.size());
+        for (int i = 0; i < items; ++i)
+            if (lst->items[static_cast<size_t>(i)].builtin >= 0) factory.push_back(i);
+        for (const auto& want : kFirst) {
+            const int at = lst->find(std::string("builtin:") + want.name);
+            CHECK(at >= 0 && lst->items[static_cast<size_t>(std::max(at, 0))].category == want.category);
+        }
+    }
+    Buf l, r;
+    beat(l, r);
+    for (size_t k = 0; k < factory.size(); ++k) {
+        Host h;
+        const auto lst = presetLibrary().listing();
+        const Entry& e = lst->items[static_cast<size_t>(factory[k])];
+        // Init, back to the first item, then forward to this one.
+        h.press(P_PRE_INIT);
+        for (int i = 0; i < items; ++i) h.press(P_PRESET_PREV);
+        for (size_t i = 0; i < k; ++i) h.press(P_PRESET_NEXT);
+        CHECK(h.display(P_PRESET) == "PRESET  " + e.category + " / " + e.name);
+        std::string text;
+        CHECK(presetText(e.key, text) && landed(h, text));
+        h.play(true);
+        h.run(l, r);
+        const double change = changeDb(l, r, h.L, h.R);
+        const float high = std::max(peak(h.L), peak(h.R));
+        std::printf("  %-14s %-18s changes the beat by %6.1f dB, peak %5.1f dBFS\n", e.category.c_str(), e.name.c_str(), change, db(high));
+        CHECK(h.finite && high <= kCeiling);
+        if (e.name == "Init") CHECK(h.L == l && h.R == r);
+        else CHECK(change > -40.0);
+    }
+    CHECK(factory.size() >= sizeof kFirst / sizeof kFirst[0]);
 }
 
 void projectState() {
@@ -727,6 +865,7 @@ void pluginTests() {
     levels();
     detents();
     presetsRoundTrip();
+    factoryPresets();
     projectState();
     displayRate();
     suspendResume();
