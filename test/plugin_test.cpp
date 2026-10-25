@@ -670,7 +670,7 @@ void presetsRoundTrip() {
     std::printf("== a user preset: saved, Init, loaded back\n");
     freshUserPresets();
     Host h;
-    CHECK(has(h.display(P_PRESET), "Init") || h.display(P_PRESET) == "PRESET  -");
+    CHECK(h.display(P_PRESET) == "PRESET  Utility / Init");   // a new instance is Init
     Rng rng(99);
     spread(h, rng);
     Host reference;   // the same sound, to compare with once it is back
@@ -708,13 +708,39 @@ void presetsRoundTrip() {
     std::ofstream(fixtureDir() + "/presets/User/User 003.gfp")
         << "grooveforce 1\nswing=0.7\nno_such_key=5\npump_curve=Wobble\npump_rate=1 bar\nvol_depth=oops\n";
     Host g;
-    g.press(P_PRE_INIT);   // a new instance's stepper stands at the first item, which is no longer Init
     g.press(P_PRESET_NEXT);   // Init -> User 001 -> User 002 -> User 003
     g.press(P_PRESET_NEXT);
     g.press(P_PRESET_NEXT);
     CHECK(has(g.display(P_PRESET), "User 003"));
     CHECK(g.display(P_SWING) == "70%" && g.display(P_PUMP_RATE) == "1 bar");
     CHECK(g.display(P_PUMP_CURVE) == "Smooth" && g.display(P_VOL_DEPTH) == "0%");   // what it didn't name is the default
+    freshUserPresets();
+}
+
+// A new instance is Init, and its preset stepper stands there: wherever Init sorts (08_Utility, last of the factory set),
+// the arrows go on from it, and the browser still opens on the first category.
+void freshInstance() {
+    std::printf("== a new instance: on Init\n");
+    freshUserPresets();
+    Host init;
+    init.press(P_PRE_INIT);
+    Host h;
+    CHECK(h.display(P_PRESET) == "PRESET  Utility / Init" && allDefaults(h));
+    CHECK(h.get(P_PRESET) > 0.0f && h.get(P_PRESET) == init.get(P_PRESET));   // the stepper's value stands on it too
+    CHECK(has(h.chunk(), "\npreset=builtin:Init\n"));
+    CHECK(h.display(P_ITEM_1) == "Bass Pump");
+    h.press(P_PRESET_NEXT);   // no user presets: the end of the list, nothing to load
+    CHECK(h.display(P_PRESET) == "PRESET  Utility / Init");
+    h.press(P_PRESET_PREV);   // one back is the factory preset before Init
+    CHECK(h.display(P_PRESET) == "PRESET  Drum Bus / Low Pump" && !allDefaults(h));
+    h.press(P_PRESET_NEXT);
+    CHECK(h.display(P_PRESET) == "PRESET  Utility / Init" && allDefaults(h));
+    Host saver;   // with a user preset in the list, one arrow forward from a new instance is that preset
+    saver.setN(P_SWING, 1.0f);
+    saver.press(P_PRE_SAVE);
+    Host g;
+    g.press(P_PRESET_NEXT);
+    CHECK(has(g.display(P_PRESET), "User 001") && g.display(P_SWING) == "75%");
     freshUserPresets();
 }
 
@@ -1224,6 +1250,7 @@ void pluginTests() {
     pumpThroughMpc();
     detents();
     presetsRoundTrip();
+    freshInstance();
     factoryPresets();
     projectState();
     displayRate();
