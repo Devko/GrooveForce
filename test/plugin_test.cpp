@@ -3,10 +3,10 @@
 // modules are test/*_test.cpp; pluginTests() is called by test/main.cpp after them. Built with ASan/UBSan
 // by `make test`, for the Force's CPU under qemu by `make test-arm`.
 //
-// Until the chain is wired into the engine (Task 11's second half) the engine plays only the three
-// levels, so what is tested here is the glue: the parameters, their texts, the presets and the project
-// state, the redraws, suspend and resume, and that nothing hostile gets out. The tests that need the
-// chain (pumpThroughMpc, suspendResume while pumping, the stress with the DSP) come with it.
+// What is tested here is the glue and the chain behind it: the parameters, their texts and their map onto
+// the chain (grooveParams), the presets and the project state, the redraws and the status line, the Pump on
+// MPC's grid (pumpThroughMpc), suspend and resume with the Pump running, and that nothing hostile gets out
+// of the whole thing at once (stress). The modules' own behaviour is in their suites.
 #include "host.h"
 #include "../plugin/presets.h"
 #include "../plugin/surface.h"
@@ -95,6 +95,41 @@ bool allDefaults(Host& h) {
 void freshUserPresets() {
     std::error_code ec;
     fs::remove_all(fixtureDir() + "/presets/User", ec);
+}
+
+constexpr int kBeat = 22050;   // a quarter note at 120 BPM, in samples
+constexpr float kDuck = 0.005f;   // a duck is the output under this, a hundredth of the 0.5 the tests feed
+// The steepest step of that 0.5 when its gain moves a full scale in a millisecond (and 10% more).
+constexpr float kSlope = 0.5f / 44.1f * 1.1f;
+
+// A steady input through the plugin, the output appended to `all`: the host's timeline from where it began.
+void runDc(Host& h, Buf& all, int blocks, float l = 0.5f, float r = 0.25f) {
+    h.run(Buf(static_cast<size_t>(blocks) * kBlock, l), Buf(static_cast<size_t>(blocks) * kBlock, r));
+    all.insert(all.end(), h.L.begin(), h.L.end());
+}
+
+// Where the output goes under `below`: the first sample of each duck.
+std::vector<int> ducks(const Buf& x, float below) {
+    std::vector<int> at;
+    for (size_t i = 0; i < x.size(); ++i)
+        if (x[i] < below && (i == 0 || x[i - 1] >= below)) at.push_back(static_cast<int>(i));
+    return at;
+}
+
+// The Pump as the tests use it: Hard, 1/4, the depth given, MPC playing at 120 BPM.
+void pumpOn(Host& h, float depth) {
+    h.on(P_PUMP_ON);
+    h.option(P_PUMP_CURVE, "Hard");
+    h.option(P_PUMP_RATE, "1/4");
+    h.set(P_PUMP_DEPTH, depth);
+    h.play(true);
+}
+
+// "1 OF 2 ON": the parts the status line says are running (-1: it doesn't say).
+int partsOn(Host& h) {
+    const std::string s = h.display(P_STATUS);
+    const size_t at = s.find(" OF 2 ON");
+    return at != std::string::npos && at > 0 && s[at - 1] >= '0' && s[at - 1] <= '9' ? s[at - 1] - '0' : -1;
 }
 
 std::string fileText(const std::string& path) {
@@ -216,6 +251,158 @@ void displays() {
     CHECK(paramNorm(P_FLT_CUTOFF, 1e38f) == 1.0f);   // a hand-edited huge value is the top
 }
 
+// The parameters as the chain gets them (grooveParams): every one of them mapped, the lists to the DSP's own indices and
+// beats, and a value within a hair of its rest exactly at rest (Init is the input, bit for bit, and a knob left a hair
+// off its detent must not wake a part).
+void mapping() {
+    std::printf("== grooveParams: every parameter, every rest\n");
+    float n[P_COUNT];
+    auto defaults = [&n] {
+        for (int i = 0; i < P_COUNT; ++i) n[i] = PARAM_INFO[i].def;
+    };
+    auto at = [&n](int id, float value) { n[id] = paramNorm(id, value); };   // by its real value (an option: its index)
+    auto near = [](double a, double b) { return std::fabs(a - b) <= 1e-4 * std::max(1.0, std::fabs(b)); };
+
+    // The defaults are the chain's own, and the rests are exact.
+    defaults();
+    const Groove::Params d = grooveParams(n);
+    const Groove::Params z;
+    CHECK(!d.pumpOn && !d.shapeOn && d.pumpTarget == Groove::kAll && d.shapeTarget == Groove::kAll);
+    CHECK(d.inputDb == 0.0f && d.outputDb == 0.0f && d.mix == 1.0f);
+    CHECK(d.swing.amount == 0.5f && d.swing.unitBeats == 0.25);
+    CHECK(d.pump.depth == 0.0f && d.pump.mix == 1.0f && d.pump.pushMs == 0.0f && d.shape.amount == 1.0f && d.shape.mix == 1.0f);
+    CHECK(d.pump.rateBeats == z.pump.rateBeats && d.pump.curve == z.pump.curve && d.pump.trigger == z.pump.trigger &&
+          d.pump.band == z.pump.band && near(d.pump.length, z.pump.length) && near(d.pump.sensitivity, z.pump.sensitivity) &&
+          near(d.pump.crossoverHz, z.pump.crossoverHz));
+    bool lanes = d.shape.filterType == z.shape.filterType && d.shape.cutoffHz == 20000.0f && d.shape.resonance == 0.0f;
+    for (int l = 0; l < Shape::kLanes; ++l) {
+        const Shape::LaneParams &a = d.shape.lane[l], &b = z.shape.lane[l];
+        lanes = lanes && a.on == b.on && a.shape == b.shape && a.rateBeats == b.rateBeats && a.depth == 0.0f && a.phase == 0.0f;
+    }
+    CHECK(lanes);
+
+    // Every parameter, to a value of its own.
+    defaults();
+    at(P_SWING, 0.62f);
+    at(P_SWING_UNIT, 1);
+    at(P_PUMP_ON, 1);
+    at(P_PUMP_RATE, 4);   // 1 bar
+    at(P_PUMP_CURVE, PC_HOLD);
+    at(P_PUMP_DEPTH, 0.7f);
+    at(P_PUMP_LENGTH, 0.3f);
+    at(P_PUMP_PUSH, -4.0f);
+    at(P_PUMP_TRIGGER, Pump::kInput);
+    at(P_PUMP_SENS, 0.8f);
+    at(P_PUMP_BAND, Pump::kHighs);
+    at(P_PUMP_XOVER, 200.0f);
+    at(P_PUMP_TARGET, Groove::kEcho);
+    at(P_PUMP_MIX, 0.4f);
+    at(P_SHAPE_ON, 1);
+    at(P_SHAPE_DEPTH, 0.3f);
+    at(P_SHAPE_TARGET, Groove::kDry);
+    at(P_SHAPE_MIX, 0.6f);
+    for (int id : {P_VOL_ON, P_FLT_ON, P_PAN_ON}) at(id, 1);
+    at(P_VOL_SHAPE, 5);
+    at(P_FLT_SHAPE, 9);
+    at(P_PAN_SHAPE, static_cast<float>(PARAM_INFO[P_PAN_SHAPE].nopts - 1));
+    at(P_VOL_RATE, static_cast<float>(kNumShapeRates - 1));   // the longest
+    at(P_FLT_RATE, 4);
+    at(P_PAN_RATE, 0);
+    at(P_VOL_DEPTH, 0.5f);
+    at(P_FLT_DEPTH, -0.5f);
+    at(P_PAN_DEPTH, 0.25f);
+    at(P_VOL_PHASE, 0.25f);
+    at(P_FLT_PHASE, 0.5f);
+    at(P_PAN_PHASE, 0.75f);
+    at(P_FLT_TYPE, Shape::kHP);
+    at(P_FLT_CUTOFF, 1000.0f);
+    at(P_FLT_RESO, 0.7f);
+    at(P_INPUT, -6.0f);
+    at(P_OUTPUT, 3.0f);
+    at(P_MIX, 0.5f);
+    const Groove::Params p = grooveParams(n);
+    CHECK(p.pumpOn && p.shapeOn && p.pumpTarget == Groove::kEcho && p.shapeTarget == Groove::kDry);
+    CHECK(near(p.swing.amount, 0.62) && p.swing.unitBeats == 0.5);
+    CHECK(p.pump.rateBeats == kPumpRates[4].beats && p.pump.rateBeats == 4.0 && p.pump.curve == PC_HOLD);
+    CHECK(near(p.pump.depth, 0.7) && near(p.pump.length, 0.3) && near(p.pump.pushMs, -4.0) && near(p.pump.sensitivity, 0.8));
+    CHECK(p.pump.trigger == Pump::kInput && p.pump.band == Pump::kHighs && near(p.pump.crossoverHz, 200.0) && near(p.pump.mix, 0.4));
+    CHECK(near(p.shape.amount, 0.3) && near(p.shape.mix, 0.6));
+    CHECK(p.shape.lane[Shape::kVolume].on && p.shape.lane[Shape::kFilter].on && p.shape.lane[Shape::kPan].on);
+    CHECK(p.shape.lane[Shape::kVolume].shape == 5 && p.shape.lane[Shape::kFilter].shape == 9 &&
+          p.shape.lane[Shape::kPan].shape == PARAM_INFO[P_PAN_SHAPE].nopts - 1);
+    CHECK(p.shape.lane[Shape::kVolume].rateBeats == kShapeRates[kNumShapeRates - 1].beats &&
+          p.shape.lane[Shape::kFilter].rateBeats == kShapeRates[4].beats && p.shape.lane[Shape::kPan].rateBeats == kShapeRates[0].beats);
+    CHECK(near(p.shape.lane[Shape::kVolume].depth, 0.5) && near(p.shape.lane[Shape::kFilter].depth, -0.5) &&
+          near(p.shape.lane[Shape::kPan].depth, 0.25));
+    CHECK(near(p.shape.lane[Shape::kVolume].phase, 0.25) && near(p.shape.lane[Shape::kFilter].phase, 0.5) &&
+          near(p.shape.lane[Shape::kPan].phase, 0.75));
+    CHECK(p.shape.filterType == Shape::kHP && near(p.shape.cutoffHz, 1000.0) && near(p.shape.resonance, 0.7));
+    CHECK(near(p.inputDb, -6.0) && near(p.outputDb, 3.0) && near(p.mix, 0.5));
+    // The ends of every list land on the list's own ends: the rates' first and last, the targets, the filter types.
+    for (int o = 0; o < kNumShapeRates; ++o) {
+        defaults();
+        at(P_PAN_RATE, static_cast<float>(o));
+        CHECK(grooveParams(n).shape.lane[Shape::kPan].rateBeats == kShapeRates[o].beats);
+    }
+    for (int o = 0; o < 5; ++o) {
+        defaults();
+        at(P_PUMP_RATE, static_cast<float>(o));
+        CHECK(grooveParams(n).pump.rateBeats == kPumpRates[o].beats);
+    }
+    for (int o = 0; o < PC_COUNT; ++o) {
+        defaults();
+        at(P_PUMP_CURVE, static_cast<float>(o));
+        CHECK(grooveParams(n).pump.curve == o);
+    }
+
+    // A hair off its rest is its rest, exactly; a real step is not.
+    defaults();
+    n[P_PUMP_DEPTH] = 4e-4f;
+    n[P_VOL_DEPTH] = 4e-4f;
+    n[P_FLT_DEPTH] = 0.5f + 2e-4f;
+    n[P_PAN_DEPTH] = 0.5f - 2e-4f;
+    n[P_PUMP_PUSH] = 0.25f + 1e-4f;
+    n[P_PUMP_MIX] = 1.0f - 4e-4f;
+    n[P_SHAPE_DEPTH] = 1.0f - 4e-4f;
+    n[P_SHAPE_MIX] = 1.0f - 4e-4f;
+    n[P_FLT_CUTOFF] = 1.0f - 1e-6f;
+    n[P_FLT_RESO] = 4e-4f;
+    n[P_INPUT] = 0.5f + 1e-5f;
+    n[P_OUTPUT] = 0.5f - 1e-5f;
+    n[P_MIX] = 1.0f - 4e-4f;
+    n[P_SWING] = 1e-3f;
+    const Groove::Params s = grooveParams(n);
+    CHECK(s.pump.depth == 0.0f && s.shape.lane[Shape::kVolume].depth == 0.0f && s.shape.lane[Shape::kFilter].depth == 0.0f &&
+          s.shape.lane[Shape::kPan].depth == 0.0f);
+    CHECK(s.pump.pushMs == 0.0f && s.pump.mix == 1.0f && s.shape.amount == 1.0f && s.shape.mix == 1.0f);
+    CHECK(s.shape.cutoffHz == 20000.0f && s.shape.resonance == 0.0f);
+    CHECK(s.inputDb == 0.0f && s.outputDb == 0.0f && s.mix == 1.0f && s.swing.amount == 0.5f);
+    defaults();
+    n[P_PUMP_DEPTH] = 0.01f;
+    n[P_INPUT] = 0.5f + 0.001f;
+    n[P_SWING] = 0.02f;
+    n[P_PUMP_PUSH] = 0.25f + 0.005f;
+    const Groove::Params t = grooveParams(n);
+    CHECK(near(t.pump.depth, 0.01) && t.inputDb > 0.04f && t.swing.amount > 0.504f && t.pump.pushMs > 0.1f);
+
+    // Whatever MPC or a hand-edited file says, the chain gets numbers it can use.
+    bool usable = true;
+    for (float w : {std::nanf(""), -1.0f, 2.0f, 1e30f, -1e30f, 0.0f, 1.0f}) {
+        for (int i = 0; i < P_COUNT; ++i) n[i] = w;
+        const Groove::Params q = grooveParams(n);
+        usable = usable && std::isfinite(q.inputDb) && std::isfinite(q.outputDb) && std::isfinite(q.mix) && std::isfinite(q.swing.amount);
+        usable = usable && std::isfinite(q.pump.depth) && std::isfinite(q.pump.length) && std::isfinite(q.pump.pushMs) &&
+                 std::isfinite(q.pump.crossoverHz) && q.pump.curve >= 0 && q.pump.curve < PC_COUNT && q.pump.rateBeats > 0.0;
+        usable = usable && q.pumpTarget >= Groove::kAll && q.pumpTarget <= Groove::kEcho && q.shapeTarget >= Groove::kAll &&
+                 q.shapeTarget <= Groove::kEcho && std::isfinite(q.shape.cutoffHz) && q.shape.filterType >= Shape::kLP &&
+                 q.shape.filterType <= Shape::kHP;
+        for (const Shape::LaneParams& lane : q.shape.lane)
+            usable = usable && std::isfinite(lane.depth) && std::isfinite(lane.phase) && lane.rateBeats > 0.0 && lane.shape >= 0 &&
+                     lane.shape < PARAM_INFO[P_VOL_SHAPE].nopts;
+    }
+    CHECK(usable);
+}
+
 void passThrough() {
     std::printf("== Init: the input, bit for bit\n");
     const Buf l = whiteNoise(kBlocksPerSec * kBlock, 0.5f, 3), r = whiteNoise(kBlocksPerSec * kBlock, 0.5f, 4);
@@ -274,7 +461,7 @@ void passThrough() {
     }
 }
 
-// The three levels, the only sound the engine makes until the chain is in.
+// The three levels (the chain's own: Groove glides each at a full scale a millisecond, no faster).
 void levels() {
     std::printf("== Input, Output and Mix\n");
     const Buf in(8 * kBlock, 0.1f);
@@ -303,12 +490,12 @@ void levels() {
         h.run(in);
         CHECK(h.L == in);   // all dry: the input, bit for bit, whatever the input level says
     }
-    {   // a jump of 24 dB glides: no step in the output bigger than the glide's
+    {   // a jump of 24 dB glides at a full scale a millisecond (the chain's rule): 15 ms, and no step bigger than that
         Host h;
         h.blocks(1);
         h.set(P_INPUT, 24.0f);
-        h.run(Buf(4 * kBlock, 0.01f));
-        CHECK(maxStep(h.L) < 0.01f * (15.85f - 1.0f) / 441.0f * 1.05f && h.L.back() > 0.15f);
+        h.run(Buf(6 * kBlock, 0.01f));
+        CHECK(maxStep(h.L) < 0.01f / 44.1f * 1.05f && h.L.back() > 0.15f);
     }
     {   // the first snapshot is taken as it is: a project with its levels set doesn't glide from 0 dB
         Host h;
@@ -316,6 +503,103 @@ void levels() {
         h.run(in);
         CHECK(std::fabs(h.L.front() / 0.1f - 3.981f) < 0.02f);
     }
+}
+
+// The Pump on MPC's grid: depth 1, Hard, 1/4, MPC playing at 120 BPM. The output dips to nothing on every beat,
+// wherever in a 128-frame block the beat falls (so each chunk is given the song position at its own first sample),
+// and is the input again between. A locate, a stop and a tempo change leave it on the grid.
+void pumpThroughMpc() {
+    std::printf("== the Pump through MPC: a dip on every beat\n");
+    {   // off: the input, bit for bit, whatever depth says
+        Host h;
+        h.set(P_PUMP_DEPTH, 1.0f);
+        h.play(true);
+        const Buf in(8 * kBlock, 0.5f);
+        h.run(in);
+        CHECK(h.L == in);
+    }
+    Host h;
+    pumpOn(h, 1.0f);
+    Buf all;
+    runDc(h, all, 700);   // four beats and a bit: the beats fall 34, 68 and 102 frames into their blocks
+    const Buf right = h.R;
+    const std::vector<int> at = ducks(all, kDuck);
+    CHECK(at.size() == 5);
+    bool onBeat = at.size() == 5, deep = true, whole = true;
+    for (size_t k = 0; k < at.size() && k < 5; ++k) {
+        const int beat = static_cast<int>(k) * kBeat;
+        onBeat = onBeat && std::abs(at[k] - beat) <= 3;
+        deep = deep && *std::min_element(all.begin() + std::max(beat - 3, 0), all.begin() + beat + 4) < 0.001f;
+        if (k + 1 < at.size())   // recovered (0.6 of a beat) and not yet dropping for the next one
+            for (int i = at[k] + 14000; i < at[k + 1] - 100; ++i) whole = whole && all[static_cast<size_t>(i)] > 0.499f;
+    }
+    CHECK(onBeat);   // the bottom of each duck is on the beat, to three samples
+    CHECK(deep);
+    CHECK(whole);
+    float skew = 0.0f;   // both channels ducked alike: 0.5 and 0.25 stay two to one
+    for (size_t i = 0; i < all.size(); ++i) skew = std::max(skew, std::fabs(2.0f * right[i] - all[i]));
+    CHECK(skew < 1e-6f);
+    Buf both = all;   // the join to the next run is part of it
+
+    // A locate: the next beat is the one MPC says, a long way from where the audio was.
+    h.log.time.ppqPos = 10.5;
+    Buf after;
+    runDc(h, after, 400);   // 2.3 beats
+    std::vector<int> d = ducks(after, kDuck);
+    CHECK(d.size() == 2 && std::abs(d[0] - kBeat / 2) <= 3 && std::abs(d[1] - kBeat / 2 - kBeat) <= 3);
+    both.insert(both.end(), after.begin(), after.end());
+    // Stopped, the grid runs on at the tempo from where it was.
+    h.play(false);
+    Buf idle;
+    runDc(h, idle, 300);
+    const double where = 10.5 + 400.0 * kBlock / kBeat;
+    const int first = static_cast<int>(std::lround((std::ceil(where) - where) * kBeat));
+    d = ducks(idle, kDuck);
+    CHECK(d.size() == 2 && std::abs(d[0] - first) <= 3 && std::abs(d[1] - first - kBeat) <= 3);
+    both.insert(both.end(), idle.begin(), idle.end());
+    // A new tempo and a new place: 150 BPM is a beat every 17640 samples. (Landing on a beat the level comes down from 1 at a
+    // millisecond's pace and meets the recovery on its way up, a hair above nothing: no duck at 0.)
+    h.play(true);
+    h.log.time.tempo = 150.0;
+    h.log.time.ppqPos = 20.0;
+    Buf fast;
+    runDc(h, fast, 300);
+    d = ducks(fast, kDuck);
+    CHECK(d.size() == 2 && std::abs(d[0] - 17640) <= 3 && std::abs(d[1] - 2 * 17640) <= 3);
+    both.insert(both.end(), fast.begin(), fast.end());
+    CHECK(maxStep(both) < kSlope);   // no click anywhere, locates and all: nothing faster than a full scale a millisecond
+    CHECK(h.finite);
+}
+
+// The status line: what the plugin costs and how many of its two parts run, told to MPC (an UpdateDisplay) when it
+// changes. The first report is half a second of audio away, and so is each next one.
+void statusLine() {
+    std::printf("== the status line: CPU, PEAK and the parts that run\n");
+    Host h;
+    h.blocks(180);
+    const std::string s = h.display(P_STATUS);
+    CHECK(starts(s, "CPU ") && has(s, "%   PEAK ") && has(s, "%   0 OF 2 ON"));
+    int told = h.log.updates;
+    auto settle = [&] {   // what the line says once the next report is out, and whether MPC was asked to read it again
+        h.blocks(180);
+        const bool asked = h.log.updates > told;
+        told = h.log.updates;
+        return asked;
+    };
+    h.on(P_PUMP_ON);
+    CHECK(settle() && partsOn(h) == 1);
+    h.on(P_SHAPE_ON);
+    CHECK(settle() && partsOn(h) == 2);
+    // A part aimed at the Echo has nothing to work on until plan 2: it rests, and is not counted.
+    h.option(P_SHAPE_TARGET, "Echo");
+    CHECK(settle() && partsOn(h) == 1);
+    h.option(P_SHAPE_TARGET, "All");
+    CHECK(settle() && partsOn(h) == 2);
+    h.option(P_PUMP_ON, "Off");   // not counted once its fade is over
+    CHECK(settle() && partsOn(h) == 1);
+    h.option(P_SHAPE_ON, "Off");
+    CHECK(settle() && partsOn(h) == 0);
+    CHECK(starts(h.display(P_STATUS), "CPU "));
 }
 
 void detents() {
@@ -697,14 +981,14 @@ void displayRate() {
 }
 
 // Stop: MPC suspends the plugin and resumes it ~100 ms later. The slot's ON button off: the same, for as long as it is
-// off. Under 250 ms every state is kept, over it everything is cleared. Until the chain is in the only state is the glide
-// of the levels (10 ms); the test with the Pump running is Task 11's second half.
+// off. Under 250 ms every state is kept, over it everything is cleared. The state a level has is its glide (a full scale
+// a millisecond: 0 -> +24 dB takes 655 samples); suspendPumping below is the same with the Pump running.
 void suspendResume() {
     std::printf("== suspend and resume (Stop, the slot's ON button)\n");
     const Buf in(kBlock, 0.1f);
-    auto gliding = [&in](Host& h) {   // Input 0 -> +12 dB: a glide of 441 samples, 128 of them played
+    auto gliding = [&in](Host& h) {   // Input 0 -> +24 dB: a glide of 655 samples, 128 of them played
         h.blocks(1);
-        h.set(P_INPUT, 12.0f);
+        h.set(P_INPUT, 24.0f);
         h.run(in);
     };
     {   // Stop (~100 ms): the glide goes on where it was, no step, and the project is as it was
@@ -712,15 +996,15 @@ void suspendResume() {
         gliding(h);
         const float last = h.L.back();
         const std::string project = h.chunk();
-        CHECK(last > 0.15f && last < 0.25f);
+        CHECK(last > 0.3f && last < 0.5f);
         {
             Turn quick(100);
             h.op(vst::effMainsChanged, 0, 0);
             h.op(vst::effMainsChanged, 0, 1);
         }
         h.run(in);
-        CHECK(std::fabs(h.L.front() - last) < 0.001f);           // no click
-        CHECK(h.L.back() > last + 0.05f && h.L.back() < 0.3f);   // still on its way to 0.398
+        CHECK(std::fabs(h.L.front() - last) < 0.003f);           // no click: one step of the glide (0.0023)
+        CHECK(h.L.back() > last + 0.2f && h.L.back() < 1.0f);    // still on its way to 1.585
         CHECK(h.chunk() == project);
     }
     {   // MPC suspends a second time before it resumes (it does): the first time counts
@@ -734,7 +1018,7 @@ void suspendResume() {
             h.op(vst::effMainsChanged, 0, 1);
         }
         h.run(in);
-        CHECK(std::fabs(h.L.front() - last) < 0.001f);
+        CHECK(std::fabs(h.L.front() - last) < 0.003f);
     }
     {   // the slot switched off for a while: everything cleared, the glide done at once
         Host h;
@@ -746,10 +1030,10 @@ void suspendResume() {
             h.op(vst::effMainsChanged, 0, 1);
         }
         h.run(in);
-        CHECK(std::fabs(h.L.front() - 0.3981f) < 0.002f && std::fabs(h.L.back() - 0.3981f) < 0.002f);
+        CHECK(std::fabs(h.L.front() - 1.5849f) < 0.005f && std::fabs(h.L.back() - 1.5849f) < 0.005f);
         CHECK(h.chunk() == project);   // the sound is the user's, not a tail
         h.run(in);
-        CHECK(std::fabs(h.L.back() - 0.3981f) < 0.002f);
+        CHECK(std::fabs(h.L.back() - 1.5849f) < 0.005f);
     }
     {   // resumed without having been suspended: nothing is cleared
         Host h;
@@ -760,9 +1044,73 @@ void suspendResume() {
             h.op(vst::effMainsChanged, 0, 1);
         }
         h.run(in);
-        CHECK(std::fabs(h.L.front() - last) < 0.001f);
+        CHECK(std::fabs(h.L.front() - last) < 0.003f);
     }
     CHECK(Host().op(vst::effGetTailSize) >= 1);
+}
+
+// The same with the Pump running (the case the glue's 250 ms rule is for): the Pump has its depth coming in over
+// 20 ms when MPC stops, and the beat is a fifth of a second away. A Stop of ~100 ms resets nothing, so the depth goes
+// on coming in where it was (no step), the dip lands on the beat, and the project is as it was; a slot off for 300 ms
+// clears it, and the depth is all there at once. A reset on a short Stop would be a step of 0.3 here.
+void suspendPumping() {
+    std::printf("== suspend and resume with the Pump running\n");
+    auto begin = [](Host& h, Buf& all) {
+        pumpOn(h, 0.0f);
+        runDc(h, all, 1);      // depth 0: the input as it is
+        h.set(P_PUMP_DEPTH, 1.0f);
+        runDc(h, all, 2);      // 256 samples on its way up: about a third of the depth
+    };
+    for (int times = 1; times <= 2; ++times) {   // Stop: ~100 ms, MPC suspends twice before it resumes (it does)
+        Host h;
+        Buf all;
+        begin(h, all);
+        const float last = all.back();
+        const std::string project = h.chunk();
+        CHECK(last > 0.3f && last < 0.45f);
+        {
+            Turn quick(100);
+            for (int k = 0; k < times; ++k) h.op(vst::effMainsChanged, 0, 0);
+            h.op(vst::effMainsChanged, 0, 1);
+        }
+        runDc(h, all, 180);   // past the first beat, at 22050
+        CHECK(std::fabs(all[384] - last) < kSlope);   // no click: the next step of the glide
+        CHECK(maxStep(all) < kSlope);
+        const std::vector<int> at = ducks(all, kDuck);
+        CHECK(at.size() == 1 && std::abs(at[0] - kBeat) <= 3);   // and the beat is where MPC's song position puts it
+        CHECK(h.chunk() == project);
+        CHECK(h.finite);
+    }
+    {   // the slot off for 300 ms: cleared; the depth is all there, and the beat is still on the grid
+        Host h;
+        Buf all;
+        begin(h, all);
+        const float last = all.back();
+        {
+            Turn slow(300);
+            h.op(vst::effMainsChanged, 0, 0);
+            h.op(vst::effMainsChanged, 0, 1);
+        }
+        runDc(h, all, 180);
+        CHECK(all[384] < 0.1f && last - all[384] > 0.2f);   // full depth at once: 0.5 x the level 0.085 into the recovery
+        const std::vector<int> at = ducks(all, kDuck);
+        CHECK(at.size() == 1 && std::abs(at[0] - kBeat) <= 3);
+        CHECK(h.finite);
+    }
+    {   // MPC stops the transport and then suspends: the grid runs on at the tempo
+        Host h;
+        Buf all;
+        begin(h, all);
+        h.play(false);
+        {
+            Turn quick(100);
+            h.op(vst::effMainsChanged, 0, 0);
+            h.op(vst::effMainsChanged, 0, 1);
+        }
+        runDc(h, all, 180);   // Play was not pressed: still 22050 to the beat, at 120 BPM
+        const std::vector<int> at = ducks(all, kDuck);
+        CHECK(at.size() == 1 && std::abs(at[0] - kBeat) <= 3 && maxStep(all) < kSlope);
+    }
 }
 
 // MPC's transport doing odd things, and the host's too.
@@ -784,7 +1132,8 @@ void shake(Host& h, Rng& rng) {
 }
 
 // 60 s of random parameter writes, taps and detents, transport jumps and bursts of NaN and infinity in loud
-// input: every sample that leaves is a number, none above +18 dBFS, and Init afterwards is the input again.
+// input, with the chain (Pump, Shape, every lane, the targets, the levels) running a good part of the time: every
+// sample that leaves is a number, none above +18 dBFS, and Init afterwards is the input again.
 void stress() {
     std::printf("== 60 s of everything at once, at random\n");
     freshUserPresets();
@@ -792,9 +1141,14 @@ void stress() {
     Rng rng(12345);
     const int total = 60 * kBlocksPerSec;
     float worst = 0.0f;
-    int saves = 0;
+    int saves = 0, anyOn = 0, bothOn = 0;
     h.play(true);
     for (int blk = 0; blk < total; ++blk) {
+        if (blk % kBlocksPerSec == kBlocksPerSec - 1) {   // once a second: how many parts the status line says run
+            const int parts = partsOn(h);
+            anyOn += parts >= 1;
+            bothOn += parts == 2;
+        }
         for (int k = rng.below(4); k > 0; --k) {   // parameters: any value, in range or not
             const int id = rng.below(P_COUNT);
             if (PARAM_INFO[id].kind == Kind::Synth) {
@@ -803,6 +1157,7 @@ void stress() {
                 else if (rng.next() < 0.3f) h.detent(id, rng.next() < 0.5f ? -1 : +1);
                 else h.setN(id, rng.next());
             } else if (PARAM_INFO[id].kind != Kind::Readout && PARAM_INFO[id].kind != Kind::Popup) {
+                if (rng.next() > 0.1f) continue;   // the browser is over half the parameters: a preset load now and then, not all the time
                 if (id == P_PRE_SAVE && ++saves > 8) continue;   // a handful of files, not thousands
                 h.press(id);   // the browser: tiles, arrows, RND, favourites, Init, the stepper
             }
@@ -826,6 +1181,8 @@ void stress() {
     CHECK(h.finite);
     std::printf("  highest peak over %d blocks: %.2f (%.1f dBFS)\n", total, static_cast<double>(worst), db(worst));
     CHECK(worst <= kCeiling);
+    std::printf("  the status line said a part ran in %d of 60 seconds, both in %d\n", anyOn, bothOn);
+    CHECK(anyOn >= 20 && bothOn >= 3);   // the chain really was running, not resting through it
     // Whatever was turned: Init is the input again, bit for bit, once the glides are over.
     h.play(false);
     h.log.noTime = false;
@@ -861,14 +1218,18 @@ void pluginTests() {
     std::printf("== the plugin\n");
     basics();
     displays();
+    mapping();
     passThrough();
     levels();
+    pumpThroughMpc();
     detents();
     presetsRoundTrip();
     factoryPresets();
     projectState();
     displayRate();
+    statusLine();
     suspendResume();
+    suspendPumping();
     stress();
 
     std::error_code ec;
