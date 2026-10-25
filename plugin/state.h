@@ -1,0 +1,22 @@
+#pragma once
+// The plugin's state text, shared by projects (effGetChunk / effSetChunk) and preset files.
+//
+// "grooveforce 1": key=value lines for every sound parameter: REAL values (dB, ms, Hz, 0..1) and
+// options by name ("pump_curve=Hard", "vol_shape=Offbeat Accent"; an index is read too). A project adds
+// the preset it came from. Survives parameters being added or reordered AND ranges changing: a key it
+// doesn't know is skipped, and a project changes only what it lists.
+#include "surface.h"
+
+#include <string>
+
+namespace gf {
+
+constexpr int kStateVersion = 1;
+
+std::string saveState(const Surface& s, bool asPreset);
+bool isStateText(const std::string& text);   // "grooveforce <version >= 1>" (a UTF-8 BOM allowed)
+// A preset starts from the defaults (what it doesn't say is the default); a project's state only
+// overrides what it lists. False if it isn't GrooveForce state.
+bool loadState(Surface& s, const std::string& text, bool asPreset);
+
+} // namespace gf
