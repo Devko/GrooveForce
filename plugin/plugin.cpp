@@ -2,11 +2,12 @@
 //
 // The groove engine (plugin/engine.h) behind the touchscreen pages generated from surface/surface.py;
 // plugin/surface.* decides what every parameter does. The status line carries a CPU meter, so the
-// cost can be read on the device. What MPC does with an insert effect was measured first
-// (EffectForce's docs/PROBE.md): it calls processReplacing nonstop in place with 128 frames, suspends
-// and resumes on transport Stop (~100 ms) and for its slot's ON button (as long as it is off), and
-// never calls effSetBypass. MIDI into an insert is not asked for until GrooveForce's probe says MPC
-// sends it (docs/PROBE.md), so canDo says no.
+// cost can be read on the device, and how many of the two parts (Pump, Shape) are running. What MPC
+// does with an insert effect was measured first (EffectForce's docs/PROBE.md): it calls
+// processReplacing nonstop in place with 128 frames, suspends and resumes on transport Stop (~100 ms)
+// and for its slot's ON button (as long as it is off), and never calls effSetBypass. A short suspend
+// keeps every state (a Pump mid-duck goes on from there); only one over kLongSuspendMs clears them. MIDI into an
+// insert is not asked for until GrooveForce's probe says MPC sends it (docs/PROBE.md), so canDo says no.
 //
 // Threads: processReplacing runs on one of MPC's audio workers (which one changes between calls,
 // instances run concurrently); parameters, display text and chunks come from MPC's UI side. Host
@@ -107,10 +108,11 @@ struct Plugin {
     int      ppqOffset = 0;   // process(): this sub-block starts this many samples into the host's block
 
     // CPU meter: the audio thread sums its own CPU time against the real-time budget and publishes
-    // twice a second; the status line is formatted on the UI thread.
+    // twice a second, with how many parts ran; the status line is formatted on the UI thread.
     double           winUs = 0.0, winBudgetUs = 0.0, winPeak = 0.0;
     std::atomic<int> shownAvg{0}, shownPeak{0};   // percent
-    int              lastAvg = -1, lastPeak = -1;
+    std::atomic<int> shownRunning{0};             // parts running, of Engine::kParts
+    int              lastAvg = -1, lastPeak = -1, lastRunning = -1;
 };
 
 Plugin* self(AEffect* e) { return static_cast<Plugin*>(e->object); }
@@ -125,10 +127,12 @@ void copyStr(void* dst, const std::string& s, size_t cap) {
     static_cast<char*>(dst)[n] = 0;
 }
 
-// The status line: what the plugin costs, the average and the worst block of the last half second.
+// The status line: what the plugin costs, the average and the worst block of the last half second, and
+// how many of its parts were running.
 std::string statusText(const Plugin* p) {
-    char b[48];
-    std::snprintf(b, sizeof b, "CPU %d%%   PEAK %d%%", p->shownAvg.load(), p->shownPeak.load());
+    char b[64];
+    std::snprintf(b, sizeof b, "CPU %d%%   PEAK %d%%   %d OF %d ON", p->shownAvg.load(), p->shownPeak.load(),
+                  p->shownRunning.load(), Engine::kParts);
     return b;
 }
 
@@ -213,12 +217,15 @@ void meter(Plugin* p, double us, int n) {
 
     const int avg = static_cast<int>(std::lround(100.0 * p->winUs / p->winBudgetUs));
     const int peak = static_cast<int>(std::lround(100.0 * p->winPeak));
+    const int running = p->engine.running();
     p->winUs = p->winBudgetUs = p->winPeak = 0.0;
     p->shownAvg.store(avg);
     p->shownPeak.store(peak);
-    if (avg != p->lastAvg || peak != p->lastPeak) {
+    p->shownRunning.store(running);
+    if (avg != p->lastAvg || peak != p->lastPeak || running != p->lastRunning) {
         p->lastAvg = avg;
         p->lastPeak = peak;
+        p->lastRunning = running;
         p->surface.textsChanged();   // told by the next block's notify, within its 50 ms gap
     }
 }
@@ -335,7 +342,7 @@ intptr_t dispatch(Plugin* p, int32_t op, int32_t idx, intptr_t val, void* ptr) {
             *static_cast<void**>(ptr) = const_cast<char*>(p->chunk.c_str());
             return static_cast<intptr_t>(p->chunk.size() + 1);
         case vst::effSetChunk: {
-            if (!ptr || val <= 0 || val > (1 << 20)) return 0;   // a state is ~3 KB; more is not ours
+            if (!ptr || val <= 0 || val > (1 << 20)) return 0;   // a state is ~1 KB; more is not ours
             std::string s(static_cast<const char*>(ptr), static_cast<size_t>(val));
             while (!s.empty() && s.back() == '\0') s.pop_back();
             return loadState(p->surface, s, false) ? 1 : 0;
