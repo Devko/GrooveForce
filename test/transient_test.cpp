@@ -9,6 +9,7 @@ using gf::TransientDetector;
 
 constexpr int kHoldoffSamples = 1764;   // 40 ms at 44.1 kHz
 constexpr int kStartup = 2205;          // 50 ms: a signal that starts out of silence is an onset itself
+constexpr int kFirstWave = 220;         // 5 ms: a 55 Hz kick's first half wave (crest at 4.5 ms); a kick behind another is found within it
 
 // x += a hit: a decaying sine starting at `at` (a kick at 55 Hz, 60 ms; a short tom or snare-like hit above).
 void addHit(Buf& x, int at, double hz, double decayMs, float amp) {
@@ -18,15 +19,18 @@ void addHit(Buf& x, int at, double hz, double decayMs, float amp) {
 }
 void addKick(Buf& x, int at, float amp) { addHit(x, at, 55.0, 60.0, amp); }
 
-// Where each onset is (sample numbers), the signal fed in chunks of `chunk` samples.
+// Where each onset is (sample numbers), the signal fed in chunks of `chunk` samples. Every offset it
+// returns is in range: one check per call, not per chunk.
 std::vector<int> onsets(TransientDetector& d, const Buf& L, const Buf& R, int chunk = ef::kChunk) {
     std::vector<int> found;
+    bool inRange = true;
     for (size_t pos = 0; pos < L.size(); pos += static_cast<size_t>(chunk)) {
         const int n = static_cast<int>(std::min(static_cast<size_t>(chunk), L.size() - pos));
         const int at = d.process(&L[pos], &R[pos], n);
-        CHECK(at >= -1 && at < n);
+        inRange = inRange && at >= -1 && at < n;
         if (at >= 0) found.push_back(static_cast<int>(pos) + at);
     }
+    CHECK(inRange);
     return found;
 }
 // The same without the start: what a signal arriving out of silence makes of the first 50 ms.
@@ -36,19 +40,23 @@ std::vector<int> onsetsAfterStart(TransientDetector& d, const Buf& L, const Buf&
     return found;
 }
 
+// White noise `noiseDb` under a kick of 0.8 (as RMS: a uniform noise's RMS is its amplitude / sqrt(3));
+// under -150 none at all.
+Buf noiseBed(int n, float noiseDb, uint32_t seed) {
+    return whiteNoise(n, noiseDb < -150.0f ? 0.0f : 0.8f * ef::dbToGain(noiseDb) * 1.7320508f, seed);
+}
+
 // The start sample of beat k at 128 BPM, `lead` samples in.
 int beatStart(int lead, int k) { return lead + static_cast<int>(std::lround(k * 60.0 / 128.0 * ef::kRate)); }
 
-// A kick every beat at 128 BPM over white noise, both sides: `noiseDb` under the kick's peak (as RMS).
-void kickLoop(Buf& L, Buf& R, int lead, int beats, float noiseDb) {
-    const float kick = 0.8f;
+// A kick every beat at 128 BPM over white noise, both sides (noiseBed).
+void kickLoop(Buf& L, Buf& R, int lead, int beats, float noiseDb, double hz = 55.0, double decayMs = 60.0) {
     const int n = beatStart(lead, beats);
-    const float amp = kick * ef::dbToGain(noiseDb) * 1.7320508f;   // a uniform noise's RMS is its amplitude / sqrt(3)
-    L = whiteNoise(n, amp, 1);
-    R = whiteNoise(n, amp, 2);
+    L = noiseBed(n, noiseDb, 1);
+    R = noiseBed(n, noiseDb, 2);
     for (int k = 0; k < beats; ++k) {
-        addKick(L, beatStart(lead, k), kick);
-        addKick(R, beatStart(lead, k), kick);
+        addHit(L, beatStart(lead, k), hz, decayMs, 0.8f);
+        addHit(R, beatStart(lead, k), hz, decayMs, 0.8f);
     }
 }
 
@@ -149,27 +157,30 @@ void transientHoldoff() { // a flam of two hits 20 ms apart: one onset; 60 ms ap
 }
 
 void transientSensitivity() {   // hits -24 dB under the loudest: found at 0.9, not at 0.1
-    // A groove at 128 BPM: a loud kick on beats 1 and 3, a ghost kick 24 dB under it on 2 and 4, a
-    // beat after the loud one, whose tail is still in the slow envelope: the ghost rises to about
-    // twice that, past the 1.55 of sensitivity 0.9 and short of the 3.6 of 0.1.
-    const int lead = 4410, beats = 8;
-    const int n = beatStart(lead, beats);
+    // A groove at 100 BPM: a loud kick on each beat (the loudest), and a ghost kick 24 dB under it 280 ms
+    // after, where the loud one's tail is still in the slow envelope: the ghost rises to about 2.2 times
+    // that, past the 1.55 of sensitivity 0.9 and short of the 3.6 of 0.1.
+    const int lead = 4410, beats = 8, beat = 26460, ghostAt = 12348;   // 600 ms, 280 ms
+    const int n = lead + beats * beat;
     Buf x(static_cast<size_t>(n), 0.0f);
-    for (int k = 0; k < beats; ++k) addKick(x, beatStart(lead, k), k % 2 ? 0.8f * ef::dbToGain(-24.0f) : 0.8f);
+    for (int k = 0; k < beats; ++k) {
+        addKick(x, lead + k * beat, 0.8f);
+        addKick(x, lead + k * beat + ghostAt, 0.8f * ef::dbToGain(-24.0f));
+    }
     TransientDetector d;
     d.setSensitivity(0.9f);
     const std::vector<int> keen = onsets(d, x, x);
     d.reset();
     d.setSensitivity(0.1f);
     const std::vector<int> dull = onsets(d, x, x);
-    CHECK(static_cast<int>(keen.size()) == beats);       // every kick and every ghost
-    for (int k = 0; k < beats && k < static_cast<int>(keen.size()); ++k) {
-        const int late = keen[static_cast<size_t>(k)] - beatStart(lead, k);
-        CHECK(late >= 0 && late <= 441);   // the ghost's within 10 ms: the onset is its own
+    CHECK(static_cast<int>(keen.size()) == 2 * beats);   // every kick and every ghost
+    for (int k = 0; k < 2 * beats && k < static_cast<int>(keen.size()); ++k) {
+        const int late = keen[static_cast<size_t>(k)] - (lead + k / 2 * beat + (k % 2 ? ghostAt : 0));
+        CHECK(late >= 0 && late <= (k % 2 ? 441 : 88));   // the ghost's within 10 ms: the onset is its own
     }
-    CHECK(static_cast<int>(dull.size()) == beats / 2);   // the loud kicks alone
-    for (int k = 0; k < beats / 2 && k < static_cast<int>(dull.size()); ++k) {
-        const int late = dull[static_cast<size_t>(k)] - beatStart(lead, 2 * k);
+    CHECK(static_cast<int>(dull.size()) == beats);       // the loud kicks alone
+    for (int k = 0; k < beats && k < static_cast<int>(dull.size()); ++k) {
+        const int late = dull[static_cast<size_t>(k)] - (lead + k * beat);
         CHECK(late >= 0 && late <= 88);
     }
 
@@ -201,6 +212,82 @@ void transientSensitivity() {   // hits -24 dB under the loudest: found at 0.9, 
     d.setSensitivity(std::nanf(""));
     CHECK(onsets(d, x, x) == least);
     CHECK(most.size() >= keen.size() && keen.size() >= dull.size() && dull.size() >= least.size());
+}
+
+void transientRoll() {    // a roll of 8 equal kicks, one every 1/16, at 120, 128, 140 and 150 BPM: every kick found (0.5)
+    // The slow envelope has to have let go of one kick when the next comes, 100 ms later at 150 BPM
+    // (the second kick against the first one's tail is the hardest of the roll). A kick behind another
+    // is found 1.6 to 3.3 ms in: its start is hidden by the one before.
+    const int kicks = 8, lead = 8820;
+    for (double bpm : {120.0, 128.0, 140.0, 150.0}) {
+        const int step = static_cast<int>(std::lround(60.0 / bpm / 4.0 * ef::kRate)), n = lead + kicks * step + 13230;
+        for (float noiseDb : {-200.0f, -30.0f}) {   // clean, and over noise 30 dB under the kick
+            Buf L = noiseBed(n, noiseDb, 1), R = noiseBed(n, noiseDb, 2);
+            for (int k = 0; k < kicks; ++k) {
+                addKick(L, lead + k * step, 0.8f);
+                addKick(R, lead + k * step, 0.8f);
+            }
+            TransientDetector d;
+            const std::vector<int> found = onsetsAfterStart(d, L, R);
+            CHECK(static_cast<int>(found.size()) == kicks);
+            for (int k = 0; k < kicks && k < static_cast<int>(found.size()); ++k) {
+                const int late = found[static_cast<size_t>(k)] - (lead + k * step);
+                CHECK(late >= 0 && late <= (k ? kFirstWave : 88));   // 2 ms for the first; the others within their first wave
+            }
+        }
+    }
+}
+
+void transientLongKick() {   // a long kick (45 Hz, 250 ms decay) every beat at 128 BPM, at 1.0: one onset per kick
+    // At the keenest sensitivity the body of a long kick stands over the slow envelope again where
+    // the holdoff ends: it must not count twice.
+    for (float noiseDb : {-200.0f, -30.0f}) {
+        Buf L, R;
+        kickLoop(L, R, 8820, 16, noiseDb, 45.0, 250.0);
+        TransientDetector d;
+        d.setSensitivity(1.0f);
+        const std::vector<int> found = onsetsAfterStart(d, L, R);
+        CHECK(found.size() == 16);
+        for (int k = 0; k < 16 && k < static_cast<int>(found.size()); ++k) {
+            const int late = found[static_cast<size_t>(k)] - beatStart(8820, k);
+            CHECK(late >= 0 && late <= 88);
+        }
+    }
+}
+
+void transientBass() {    // a steady 40 Hz sine: no onsets at 0.5 or 1.0; a kick over a sustained 40 Hz bed 12 dB under it: found every time
+    const int n = 88200;
+    const Buf bass = sine(40.0, n, 0.5f);
+    TransientDetector d;
+    for (float keen : {0.5f, 1.0f}) {
+        d.reset();
+        d.setSensitivity(keen);
+        CHECK(onsetsAfterStart(d, bass, bass).empty());
+    }
+
+    // The limit: a hit has to stand out over what is sustained under it. The bed (a sine, sustained)
+    // comes in at the start and is itself an onset there; the kicks follow it.
+    const int lead = 8820, beats = 16, len = beatStart(lead, beats);
+    Buf x = sine(40.0, len, 0.8f * ef::dbToGain(-12.0f));
+    for (int k = 0; k < beats; ++k) addKick(x, beatStart(lead, k), 0.8f);
+    TransientDetector standard;   // sensitivity 0.5
+    const std::vector<int> found = onsetsAfterStart(standard, x, x);
+    CHECK(static_cast<int>(found.size()) == beats);
+    for (int k = 0; k < beats && k < static_cast<int>(found.size()); ++k) {
+        const int late = found[static_cast<size_t>(k)] - beatStart(lead, k);
+        CHECK(late >= 0 && late <= kFirstWave);   // 0.8 to 2.4 ms in: the bed hides the start
+    }
+}
+
+void transientRearm() {   // a swell at 1.0 stays over the slow envelope: onsets at least 100 ms apart, not every 40
+    const int n = 88200;
+    Buf swell = sine(220.0, n, 0.5f);   // up from nothing to 0.5 over the 2 s
+    for (int i = 0; i < n; ++i) swell[static_cast<size_t>(i)] *= static_cast<float>(i) / static_cast<float>(n);
+    TransientDetector d;
+    d.setSensitivity(1.0f);
+    const std::vector<int> found = onsets(d, swell, swell);
+    CHECK(!found.empty());
+    for (size_t k = 1; k < found.size(); ++k) CHECK(found[k] - found[k - 1] >= 4410);
 }
 
 void transientNan() {     // a NaN or inf in the input: no onset from it, still finite and finding the next kick
@@ -254,5 +341,9 @@ void transientTests() {
     transientSteady();
     transientHoldoff();
     transientSensitivity();
+    transientRoll();
+    transientLongKick();
+    transientBass();
+    transientRearm();
     transientNan();
 }
