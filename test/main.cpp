@@ -13,6 +13,7 @@ void pumpCurvesTests();
 void shapesTests();
 void transientTests();
 void crossoverTests();
+void pumpTests();
 void shapeTests();
 void pluginTests();
 
@@ -23,6 +24,7 @@ int main() {
     shapesTests();
     transientTests();
     crossoverTests();
+    pumpTests();
     shapeTests();
     pluginTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);
