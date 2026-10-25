@@ -11,12 +11,14 @@ void dspTests();
 void gridTests();
 void pumpCurvesTests();
 void transientTests();
+void crossoverTests();
 
 int main() {
     dspTests();
     gridTests();
     pumpCurvesTests();
     transientTests();
+    crossoverTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);
     return eft::g_fail ? 1 : 0;
 }
