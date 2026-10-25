@@ -3,33 +3,42 @@
 // or a drum bus is made of, found in the louder of the two sides.
 //
 // Two envelopes follow the level: a quick one (attack 0.1 ms, release 8 ms: on a hit within a few
-// samples, off it between two) and a slow one (attack 15 ms, release 44 ms: the level the quick one
+// samples, off it between two) and a slow one (attack 15 ms, release 120 ms: the level the quick one
 // is measured against, and what remembers the last loud hit). An onset is the quick envelope
 // standing well over the slow one, and over -50 dBFS so noise under the music never counts. A
 // steady tone or noise, or a swell, keeps the two together; a hit lifts the quick one first, and the
 // slow one's memory of an earlier, louder hit is what keeps its tail from counting as a new hit.
-// The slow one has to forget fast enough for a roll of 1/16 kicks (a kick every 100 ms at 150 BPM):
-// at 120 ms it was still holding the last kick when the next one came.
+// The slow release is long on purpose: a shorter one (44 ms) follows the dips and swells of a noisy
+// background or a rumble closely enough to call them hits.
 //
 // After an onset the detector waits kHoldoffMs, so one hit is one onset whatever it does inside (a
 // kick's second wave, a flam), and then it has to be armed again: the slow envelope has fallen below
-// 0.7 of the peak it reached since the onset (the hit is over), or 100 ms have passed (something
-// sustained under it, a bed, never falls). That keeps a long kick, or a swell, at the keenest
-// sensitivity from firing again where the holdoff ends, while it still stands over the slow
-// envelope. (The slow envelope, not the quick one, is what falls: a low kick's quick envelope dips
-// by a third or more at every wave, which would arm it again after the first.)
+// 0.7 of the peak it reached since the onset (the hit is over: about 43 ms after the slow envelope's
+// peak), or 100 ms have passed (something sustained under it, a bed, never falls). That keeps a long
+// kick, or a swell, at the keenest sensitivity from firing again where the holdoff ends, while it
+// still stands over the slow envelope. (The slow envelope, not the quick one, is what falls: a low
+// kick's quick envelope dips by a third or more at every wave, which would arm it again after the
+// first.) So two onsets are in practice 45 to 65 ms apart or more.
 //
 // Sensitivity sets how far over the slow envelope the quick one has to rise: a ratio from 4 (0, only
 // hits that stand out) to 1.4 (1, quiet hits too), in equal steps of log.
 //
-// The limit: a hit has to stand out roughly 9-12 dB over what is sustained under it. A kick over a
-// 40 Hz bass 12 dB under the kick's peak is found every time at the default sensitivity; at 9 dB
-// three in four, at 6 dB every other one, at 3 dB none. For a kick over a bass the Pump's Grid
-// trigger is the answer, not this detector.
+// Limits (measured in test/transient_test.cpp):
+//  - A roll of 1/16 kicks needs a keener sensitivity than the default 0.5, about 0.8: the slow
+//    envelope still holds the kick before, 100 to 125 ms back. All 8 kicks of a roll are found from
+//    0.6 at 120 BPM, 0.7 at 128 and 140 BPM, 0.8 at 150 BPM.
+//  - Rumble-like material can fire it now and then at 0.5: low-passed noise (10 s of it at 300 Hz
+//    gives some 20 onsets, at 120 Hz some 3 to 12) and the rumble of a kick's own tail; kicks over
+//    such a bed are mostly found, but an extra onset, and the kick it shadows, turn up on a few beats.
+//    White and Gaussian noise are clean. The Input trigger is for drum buses; a
+//    kick with rumble wants the Pump's Grid trigger.
+//  - A hit has to stand out roughly 9-12 dB over what is sustained under it. A kick over a 40 Hz
+//    bass 12 dB under the kick's peak is found every time at the default sensitivity; at 9 dB every
+//    other one, at 6 dB one in four, at 3 dB none. Same remedy: the Grid trigger.
 //
 // No look-ahead: the onset is the sample at which the quick envelope crosses, found as the audio
-// goes by. A kick over noise 30 dB under it is found 0.3 to 0.4 ms after it starts (the first rise
-// out of the noise); one behind another in a roll, or over a bass, 0.8 to 3.3 ms in, the sound
+// goes by. A kick over noise 30 dB under it is found 0.4 to 0.5 ms after it starts (the first rise
+// out of the noise); one behind another in a roll, or over a bass, 0.8 to 3 ms in, the sound
 // before it hiding its start.
 #include "common.h"   // sanitize, smoothCoef, kRate; simd.h for NEON
 
@@ -130,7 +139,7 @@ private:
     float env_[2] = {0.0f, 0.0f};    // quick, slow
     float peak_[2] = {0.0f, 0.0f};   // their highest since the last onset (only the slow one's is read)
     float att_[2] = {ef::smoothCoef(0.1e-3f), ef::smoothCoef(15e-3f)};
-    float rel_[2] = {ef::smoothCoef(8e-3f), ef::smoothCoef(44e-3f)};
+    float rel_[2] = {ef::smoothCoef(8e-3f), ef::smoothCoef(120e-3f)};
     float ratio_ = kRatioDull;
     int holdoff_ = 0;                // samples left before the next onset may count
     int rearm_ = 0;                  // samples left before it is armed whatever the slow envelope does
