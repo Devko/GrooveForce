@@ -15,6 +15,7 @@ void transientTests();
 void crossoverTests();
 void pumpTests();
 void shapeTests();
+void grooveTests();
 void pluginTests();
 
 int main() {
@@ -26,6 +27,7 @@ int main() {
     crossoverTests();
     pumpTests();
     shapeTests();
+    grooveTests();
     pluginTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);
     return eft::g_fail ? 1 : 0;
