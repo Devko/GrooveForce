@@ -577,17 +577,6 @@
    "default": "1/4"
   },
   {
-   "key": "pump_rate__open",
-   "name": "Pump Rate List",
-   "options": [
-    "Closed",
-    "Open"
-   ],
-   "default": "Closed",
-   "popup_of": "pump_rate",
-   "type": "enum"
-  },
-  {
    "key": "pump_curve",
    "name": "Pump Curve",
    "options": [

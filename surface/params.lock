@@ -59,7 +59,6 @@ swing
 swing_unit
 pump_on
 pump_rate
-pump_rate__open
 pump_curve
 pump_curve__open
 pump_depth
