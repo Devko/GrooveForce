@@ -193,7 +193,7 @@ R1, R2 = 158, 440                                 # card rows (h=270), or R1 wit
 # grows from 12 o'clock) is one pixel smaller than a unipolar knob of the same size. This table is the only
 # place that says so: check_layout() holds every knob to it and skin_polish.py draws the strips from it
 # (exported as build/skin_style.json).
-KNOB_SIZES = {"big": 30, "small": 22}
+KNOB_SIZES = {"big": 30}
 KNOB_STYLES = {r - b: {"bipolar": bool(b), "track": 4 if r - b >= 28 else 3, "pointer": 3.0 if r - b >= 28 else 2.5}
                for r in KNOB_SIZES.values() for b in (0, 1)}
 BIPOLAR_EXTRA = ()                                # every bipolar knob here has a symmetric range
@@ -215,10 +215,10 @@ class Layout:
     """layout.conf lines, one generator [tab] per page. Pages are grouped: a group is one button of MPC's tab strip
     and its pages are that button's sub-pages (the dots under it; a tap on the button again shows the next), each
     with its own screen and its own Q-Link set. skin_polish.py renumbers the generator's tabs into these groups
-    (skin_style.json "tab_groups"). mode() tags every widget that follows with when= until the next page or mode()."""
+    (skin_style.json "tab_groups")."""
 
     def __init__(self):
-        self.lines, self.when, self.groups = [THEME], None, []
+        self.lines, self.groups = [THEME], []
 
     def group(self, name):
         self.groups.append({"name": name, "pages": []})
@@ -229,13 +229,9 @@ class Layout:
         self.lines.append("[tab %s]" % name)
         self.lines.append('qlinks "%s" = %s' % (name, ",".join(qlinks)))
         self.groups[-1]["pages"].append(name)
-        self.when = None
-
-    def mode(self, when):
-        self.when = when
 
     def add(self, line):
-        self.lines.append(line + (' when="%s"' % self.when if self.when else ""))
+        self.lines.append(line)
 
     def header(self, status_w=1232):
         """The status line from x=24 (the preset stepper goes right-aligned to x=1256 beside a shorter one)."""
@@ -284,8 +280,9 @@ def build_layout():
     is the top one, its controls in the Q-Links' order."""
     L = Layout()
 
-    # GROOVE (docs/DESIGN.md "Pages"): the eight knobs that finish most presets, and the parts' switches with the
-    # grid's swing unit. The echo's knobs and the parts Echo and Time join it with their plans.
+    # GROOVE (docs/DESIGN.md "Pages"): the eight knobs that finish most presets, with the swing's unit right under the
+    # Swing knob (1/16 | 1/8: the one choice that says what the knob swings), and the parts' switches. The echo's knobs
+    # and the parts Echo and Time join it with their plans.
     L.group("GROOVE")
     L.page("GROOVE", ["pump_depth", "shape_depth", "swing", "mix", "output", "pump_length", "vol_depth", "flt_depth"])
     L.header(status_w=700)
@@ -293,10 +290,10 @@ def build_layout():
     L.card(24, R1, 1232, 270, "KNOBS")
     for cx, k in zip(S8, ("pump_depth", "shape_depth", "swing", "mix", "output", "pump_length", "vol_depth", "flt_depth")):
         L.knob(cx, R1 + 126, k)
-    L.card(24, R2, 1232, 270, "PARTS AND SWING")
+    L.hseg(S8[2], R1 + 244, "swing_unit", ON_SW)   # no label: it sits where the knob's value text ends, and says 1/16 | 1/8
+    L.card(24, R2, 1232, 270, "PARTS")
     L.hseg(S8[1], R2 + 150, "pump_on", ON_SW, label="PUMP")
     L.hseg(S8[3], R2 + 150, "shape_on", ON_SW, label="SHAPE")
-    L.hseg(S8[6], R2 + 150, "swing_unit", ON_SW, label="SWING UNIT")
 
     # The browser has no knobs of its own: the Q-Links keep the preset stepper and the levels.
     L.page("PRESETS", ["preset", "input", "output", "mix"])

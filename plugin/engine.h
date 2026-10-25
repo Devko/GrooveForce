@@ -1,34 +1,41 @@
 #pragma once
 // The engine: the plugin's parameters played on the audio, chunk by chunk.
 //
-// This is the interim engine of Task 11's first half. It applies only the three levels, Input, Output
-// and Mix (the dry signal against the processed one), each gliding to a new value over 10 ms. With all
-// three at their defaults it hands the block back untouched, bit for bit, as Init must. The chain
-// (dsp/groove.h: Pump, Shape, the grid's swing, the targets) arrives with Task 11's second half, which
-// replaces what render() does with each chunk; the interface below stays.
+// It holds the chain (dsp/groove.h: Shape and Pump, the grid's swing, the targets, the levels and the mix)
+// and the parameters as the chain takes them (groove_map.h's grooveParams). render() gives the chain one
+// chunk at a time, 32 samples, which is what every module expects, and with each MPC's transport at that
+// chunk's first sample: while MPC plays, the song position is moved along the block by the tempo. The Pump
+// re-anchors on the position it is given, so a loop, a locate or a tempo change leaves it on the grid.
+// Stopped, the transport's position is not used: the grid runs on at the tempo from where it was.
 //
-// Audio thread: setParams, render, reset, tailSamples.
+// reset() clears every tail, and the next chunk jumps to its targets (Groove::reset): a level, a part's
+// switch and the Pump's depth are where they are told to be, with no glide. The glue calls it only when
+// the plugin was suspended for longer than a Stop (250 ms); a short suspend keeps every state, and nothing
+// here may reset while audio is running. With the defaults the block is handed back untouched, bit for bit.
+//
+// Audio thread: setParams, render, reset, tailSamples, running.
 #include "../dsp/common.h"
+#include "../dsp/groove.h"
 #include "param_ids.h"
 
 namespace gf {
 
 class Engine {
 public:
+    static constexpr int kParts = 2;   // Shape and Pump: what running() counts against
+
     Engine();
 
     void setParams(const float* norm);   // a new snapshot of every parameter (0..1), norm[P_COUNT]
-    // In place, any n: chunk by chunk (the chain takes one chunk at a time, with MPC's transport moved
-    // along it while it plays).
+    // In place, any n: chunk by chunk (the transport moved along the block while MPC plays).
     void render(float* L, float* R, int n, const ef::Transport& t);
     void reset();                        // every tail cleared (a long suspend)
-    int tailSamples() const { return 0; }   // how long it rings after the input stops (0: none)
+    int tailSamples() const { return groove_.tailSamples(); }   // how long it rings after the input stops (0: none)
+    int running() const { return groove_.running(); }           // parts run in the last block, of kParts
 
 private:
-    void chunk(float* L, float* R, int n);
-
-    ef::Ramp in_, out_, mix_;   // linear gains and the share of the processed signal
-    bool fresh_ = true;         // nothing played yet: the first snapshot is taken as it is, not glided to
+    Groove groove_;
+    Groove::Params params_;
 };
 
 } // namespace gf
