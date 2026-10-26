@@ -34,7 +34,7 @@ MV       := third_party/mpc-vst-plugins
 SURF     := surface
 SURF_OUT := $(SURF)/build
 SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveForce
-GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h
+GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h $(SURF_OUT)/time_data.h
 SKIN     := $(SURF_OUT)/skin.stamp
 
 SRC      := $(wildcard dsp/*.cpp) $(wildcard plugin/*.cpp)
