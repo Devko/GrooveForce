@@ -1638,8 +1638,16 @@ void tilesFireMoves() {
     };
     Host e;
     e.play(true);
-    const Played echoed = playActs(e, in, inR, {{kPressBlock, [&](Host& x) { x.tap(tile); }}, {kPressBlock + 1, echoes}, {kPressBlock + 30, echoes}});
+    const Played echoed = playActs(e, in, inR, {{kPressBlock, [&](Host& x) { x.tap(tile); }}, {kPressBlock + 1, echoes}, {400, echoes}});   // (the second with the Move playing)
     CHECK(echoed.l == p.l && echoed.r == p.r);
+    // A tile set to the value it has (MPC writing its tiles back as they are) is no tap: nothing is selected or fired.
+    Host quiet;
+    quiet.play(true);
+    const Played unchanged = playActs(quiet, in, inR, {{kPressBlock, [&](Host& x) {
+                                                            x.setN(tile, 0.0f);
+                                                            x.setN(tileOf(3), 0.0f);
+                                                        }}});
+    CHECK(unchanged.l == in && unchanged.r == inR && quiet.value(P_MOVE) == 0.0f);
     Host again;
     again.play(true);
     const Played twice = playActs(again, in, inR, {{kPressBlock, [&](Host& x) { x.tap(tile); }}, {700, [&](Host& x) { x.tap(tile); }}});
@@ -1835,6 +1843,18 @@ void moveAcrossLoop() {
         CHECK(same(p.l, in, static_cast<size_t>(line2 + 4 * kBeat + 3000), in.size()));
         CHECK(maxStep(p.l, 1000, in.size()) <= baseStep * 1.25f);
     }
+    // A tempo change in the middle of it (120 to 150 BPM at block 300): it goes on where it was in its length, so it ends four
+    // beats of play after its line, the rest of them at the new tempo; and nothing clicks.
+    {
+        Host h;
+        h.play(true);
+        const Played p = playActs(h, in, {{tap, [&](Host& x) { x.tap(stutter); }}, {300, [](Host& x) { x.log.time.tempo = 150.0; }}});
+        const double played = (300.0 * kBlock - line) / kBeat;   // the beats it had played at the change
+        const int ends = 300 * kBlock + static_cast<int>(std::lround((4.0 - played) * 44100.0 * 60.0 / 150.0));
+        CHECK(allFinite(p.l) && maxDiff(p.l, in, static_cast<size_t>(ends - 6000), static_cast<size_t>(ends - 3000)) > 0.1);   // still going shortly before
+        CHECK(same(p.l, in, static_cast<size_t>(ends + 3000), in.size()));
+        CHECK(maxStep(p.l, 20000, static_cast<size_t>(ends + 3000)) <= baseStep * 1.25f);
+    }
     // The transport stopping and starting under a Move: it plays on at the tempo while stopped, and keeps its length.
     {
         Host h;
@@ -1876,6 +1896,35 @@ void moveWhileStopped() {
                                                {kPressBlock - 50, [](Host& x) { x.option(P_TIME_ON, "On"); }},
                                                {kPressBlock, [](Host& x) { x.tap(tileOf(9)); }}});
         checkStutter(p, in, inR, static_cast<int>(std::lround(1.7 * kBeat)), "Time woke late");
+    }
+}
+
+// R42: a Move that plays the past (Reverse Beat plays the beat before it, backwards) finds it, though Time was never switched
+// on: picking the Move is enough, the plugin makes Time's ring when it is picked and the ring listens from then on. The Move
+// is picked at beat 1.3 to start on the bar (beat 4), so the beat before it (3 to 4) has been heard; on a ramp, every sample
+// says where it was, and the Move reads it backwards: out(line + k) = in(line - k).
+void moveReadsThePast() {
+    std::printf("== a Move that plays the past: the ring listens from the moment the Move is picked\n");
+    const int total = 150000, line = 4 * kBeat;
+    const Buf in = ramp(total, 5e-6f), inR = ramp(total, 2.5e-6f);
+    const int reverse = optionOf("Reverse Beat");
+    CHECK(reverse == 7);
+    for (int viaTile = 0; viaTile < 2; ++viaTile) {
+        Host h;
+        h.play(true);
+        h.option(P_MOVE_QUANT, "Bar");
+        const Played p = playActs(h, in, inR, {{kPressBlock, [&](Host& x) {
+                                                    if (viaTile) x.tap(tileOf(reverse - 1));
+                                                    else x.set(P_MOVE, static_cast<float>(reverse));
+                                                }}});
+        bool backwards = true;
+        for (int k : {600, 3000, 8000, 15000, 20000})
+            backwards = backwards && std::fabs(p.l[static_cast<size_t>(line + k)] - in[static_cast<size_t>(line - k)]) < 2e-5f &&
+                        std::fabs(p.r[static_cast<size_t>(line + k)] - inR[static_cast<size_t>(line - k)]) < 2e-5f;
+        CHECK(backwards);
+        CHECK(same(p.l, in, 0, static_cast<size_t>(line - 400)));                          // live until the Move's crossfade
+        CHECK(same(p.l, in, static_cast<size_t>(line + kBeat + 3000), in.size()));          // and live again after its beat
+        CHECK(maxStep(p.l, static_cast<size_t>(line) - 1000, static_cast<size_t>(line + kBeat + 3000)) < 0.003f);
     }
 }
 
@@ -2155,15 +2204,22 @@ void presetDuringMove() {
         if (!(same(p.l, in, from + 3000, in.size()))) std::printf("  (%s)\n", load.what);
     }
     // A Throw rings its echo on after the Move (the Echo is kept on for its tail); a load drops that too: the new sound is
-    // what is heard, the old Echo is not. The impulse comes in during the Move, its repeats would come after.
-    {
+    // what is heard, the old Echo is not. The impulse comes in during the Move, its repeats would come after. The sound
+    // loaded has the line on and the Echo off (only the Echo kept on by the Move could ring it), as Init has neither.
+    for (int keepsLine = 0; keepsLine < 2; ++keepsLine) {
+        std::string loaded = Host().chunk();   // Init
+        if (keepsLine) {
+            Host line;
+            lineAOnly(line, "1/8", 0.5f, 0.0f);
+            loaded = line.chunk();
+        }
         Host h;
         h.play(true);
         lineAOnly(h, "1/8", 0.5f, 0.0f);
         Buf imp(static_cast<size_t>(total), 0.0f);
         imp[static_cast<size_t>(kLine + 15435)] = 0.5f;
         const Played p = playActs(h, imp, {{kPressBlock, [](Host& x) { x.tap(tileOf(0)); }},
-                                           {static_cast<int>((kLine + 15435 + 12000) / kBlock), [](Host& x) { x.press(P_PRE_INIT); }}});
+                                           {static_cast<int>((kLine + 15435 + 12000) / kBlock), [&](Host& x) { x.load(loaded); }}});
         const size_t cut = static_cast<size_t>(kLine + 15435 + 12000) + 3000;
         CHECK(peak(p.l, static_cast<size_t>(kLine + 15435 + 11025 - 3), static_cast<size_t>(kLine + 15435 + 11025 + 4)) > 0.3f);   // the first repeat was heard
         CHECK(peak(p.l, cut, imp.size()) < 1e-6f);                                                                              // and no tail after the load
@@ -2468,6 +2524,7 @@ void pluginTests() {
     RUN(moveParameterFires);
     RUN(moveAcrossLoop);
     RUN(moveWhileStopped);
+    RUN(moveReadsThePast);
     RUN(allocateWhilePlaying);
     RUN(twoInstancesRumble);
     RUN(presetDuringMove);

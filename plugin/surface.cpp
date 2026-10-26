@@ -204,7 +204,7 @@ void Surface::apply(int i, float n) {
         case Kind::Tile:
         case Kind::Toggle: {
             if (const int move = moveOfTile(i); move >= 0) {
-                tapMoveTile(i, move);
+                tapMoveTile(i, move, n > 0.5f);
                 break;
             }
             const bool on = n > 0.5f;
@@ -226,10 +226,12 @@ void Surface::postMove(int kind, int move) {
     moveHead_.store(head + 1, std::memory_order_release);
 }
 
-// A tap on Move `move`'s tile selects the Move and fires it. Whatever value MPC sends is a tap (it toggles what it read
-// back, and the tile reads back lit while its Move plays or waits); what follows within a second, in either direction, is
-// its release echo.
-void Surface::tapMoveTile(int param, int move) {
+// A tap on Move `move`'s tile selects the Move and fires it. A tap flips what MPC read back, and the tile reads back lit
+// while its Move plays or waits: a tap on a dark tile sends 1 and a tap on a lit one (the Move again) sends 0, and a value
+// that is the tile's own is nothing new (MPC setting its tiles to what it has, say). What follows a tap within a second,
+// whichever way, is its release echo.
+void Surface::tapMoveTile(int param, int move, bool on) {
+    if (on == (want_[param].load(std::memory_order_relaxed) > 0.5f)) return;
     const long long now = nowMs();
     if (toggleMs_[param] > 0 && now - toggleMs_[param] < kTileEchoMs) return;
     toggleMs_[param] = now;

@@ -22,8 +22,8 @@
 // on one of the 16 Move tiles and GO are Moves to fire (or stop), and a preset or project load ends the one that plays: all
 // of them happen here, on the UI thread, and Moves::fire(), stop() and reset() belong to the audio thread, so they are
 // queued (takeMoveCall, in the order they were made; a queue of 16, the newest taking the last place if it ever fills). A
-// tile is a tap whatever value MPC sends (it toggles its read-back, which the plugin lights from the audio thread: the Moves
-// that play or wait for their line); what follows a tap within a second on the same tile is MPC's release echo, not a tap.
+// tile is tapped by flipping what MPC read back (the plugin lights the tiles of the Moves that play or wait for their line,
+// from the audio thread), and what follows a tap within a second on the same tile is MPC's release echo, not another.
 #include "library.h"
 #include "move_call.h"
 #include "param_ids.h"
@@ -106,7 +106,7 @@ private:
     };
     void apply(int i, float n);
     void postMove(int kind, int move);          // UI thread (any one at a time): queue a Move call
-    void tapMoveTile(int param, int move);      // a tap on a Move's tile
+    void tapMoveTile(int param, int move, bool on);   // MPC set a Move's tile to `on`
     int  stepIndex(int i, float n, int count, int cur);
     int  stepItem(float n, int normRange, int items, int cur);   // one item per event
     bool toggleBounce(int i, bool on);
