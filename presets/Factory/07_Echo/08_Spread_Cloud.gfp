@@ -22,6 +22,7 @@ b_mtime=0.3
 c_on=On
 c_level=0.45
 c_pan=0.7
+c_div=5/16
 c_fb=0.65
 c_ftype=HP
 c_cut=500

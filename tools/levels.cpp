@@ -72,8 +72,8 @@ Played play(void* lib, const std::string& state, const std::vector<float>& inL, 
     return {gfl::lufs(L, R), pk};
 }
 
-// The preset text with its output= line set to `db` (appended when it has none). At 0.0 dB, its default, the line goes:
-// a preset sets only what it changes (surface.py refuses a line at its default).
+// The preset text with its output= line set to `db` (appended when it has none). At 0.0 dB, its default, the line goes: a
+// preset that leaves the level as it is has no Output to state.
 std::string withOutput(const std::string& text, double db) {
     std::istringstream in(text);
     std::string line, out;

@@ -885,7 +885,9 @@ double apartDb(const Buf& aL, const Buf& aR, const Buf& bL, const Buf& bR, const
 // of the difference re the input's) against the same preset with that part's work taken down to a hair, its switch and
 // everything else as they are. A hair is the Pump's depth at 1% (a banded Pump's split stays in, so Low Pump shows its
 // duck and not its crossover's phase), Shape's depth at 1% (a lane's static filter stays), the Echo's level at 1% (its
-// wet) and Time's groove Off (Time then only records). Some parts are there for the Moves alone and do nothing at rest:
+// wet) and Time's groove Off (Time then only records). A Pump or Shape aimed at the Echo works on the wet alone, so it is
+// judged against the wet's own rms, both runs with the dry level at 0: a duck on a quiet ghost layer counts for what it
+// does to that layer, not to the whole beat. Some parts are there for the Moves alone and do nothing at rest:
 // an Echo whose send is closed (a Throw opens it) with a Pump or Shape aimed at it, and Time with no groove (the Moves
 // play from its ring). A preset that selects a Move plays it from GO at the second bar, and the Move changes that bar by
 // more than -40 dB; one without a Move changes the beat at rest.
@@ -969,15 +971,23 @@ void factoryPresets() {
                            (q.param == P_SHAPE_DEPTH && onEcho(P_SHAPE_TARGET))))
                 continue;   // for the Throws
             if (q.param == P_TIME_GROOVE && h.value(P_TIME_GROOVE) == 0.0f) continue;   // for the Moves
-            Host g;
-            CHECK(g.load(text) == 1);
+            const bool wet = (q.param == P_PUMP_DEPTH && onEcho(P_PUMP_TARGET)) || (q.param == P_SHAPE_DEPTH && onEcho(P_SHAPE_TARGET));
+            Host f, g;   // the preset (the wet alone, for a part on the Echo) and the same with the part at a hair
+            CHECK(g.load(text) == 1 && (!wet || f.load(text) == 1));
             g.set(q.param, q.value);
+            if (wet) {
+                f.set(P_DRY, 0.0f);
+                g.set(P_DRY, 0.0f);
+                f.play(true);
+                f.run(l, r);
+            }
             g.play(true);
             g.run(l, r);
-            const double part = apartDb(h.L, h.R, g.L, g.R, l, r);
-            std::printf(" %s %.1f", q.what, part);
+            const Host& a = wet ? f : h;
+            const double part = apartDb(a.L, a.R, g.L, g.R, wet ? a.L : l, wet ? a.R : r);
+            std::printf(" %s%s %.1f", q.what, wet ? " (wet)" : "", part);
             if (part <= -40.0) std::printf(" <-- does nothing");
-            CHECK(g.finite && part > -40.0);
+            CHECK(f.finite && g.finite && part > -40.0);
         }
         const int move = static_cast<int>(std::lround(h.value(P_MOVE))) - 1;   // -1: None
         if (move >= 0) {

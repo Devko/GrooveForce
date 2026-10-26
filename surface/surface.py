@@ -978,7 +978,8 @@ STATE_EXTRA_KEYS = ("preset",)
 PRESET_NAME_MAX = 18      # an item tile on the browser page (816 px / 3 columns)
 CATEGORY_NAME_MAX = 12    # a category tile (320 px / 2 columns), shown in capitals
 OUTPUT_MAX_DB = 9.0       # a factory preset's Output: tools/levels.cpp sets it within this
-# The categories tools/reference_mix.h (partsFor) has material for: anything else is judged on the full mix.
+# The categories tools/reference_mix.h has material for (its kCategoryParts: change both together); anything else is
+# judged on the full mix.
 LEVEL_CATEGORIES = ("Kick", "Bass", "Hats + Perc", "Chords", "Drum Bus", "Perform", "Echo", "Utility")
 
 
@@ -988,12 +989,49 @@ def _shown(entry):
     return re.sub(r"^\d+\s+", "", re.sub(r"\.gfp$", "", entry).replace("_", " ")).replace("%2F", "/")
 
 
+def _defines(values):
+    """What a factory preset states about each part, Shape lane and Echo line it has on, even where that is today's
+    default (ruling R56): the values that define it, so that a later change of a default never moves a factory preset
+    (params.lock pins the keys, not their defaults). The keys it must name, with what they belong to."""
+    need = []
+    if values.get("pump_on") == "On":
+        need += [(k, "the Pump") for k in ("pump_rate", "pump_curve", "pump_depth", "pump_length")]
+        if values.get("pump_band", "Full") != "Full":
+            need.append(("pump_xover", "a banded Pump"))
+    if values.get("shape_on") == "On":
+        for lane, name in LANES:
+            if values.get(lane + "_on") == "On":
+                need += [(lane + k, "the %s lane" % name) for k in ("_shape", "_rate", "_depth")]
+        if values.get("flt_on") == "On":
+            need += [(k, "the Filter lane") for k in ("flt_type", "flt_cutoff")]
+    if values.get("echo_on") == "On":
+        need.append(("echo_route", "the Echo"))
+        for line, _ in LINES:
+            if values.get(line + "_on") == "On":
+                what = "line " + line.upper()
+                timing = (line + "_ms",) if values.get(line + "_sync") == "Free" else (line + "_div",)
+                need += [(k, what) for k in (line + "_level",) + timing + (line + "_fb",)]
+                if line + "_cut" in values:
+                    need.append((line + "_ftype", what + "'s filter"))
+    if values.get("time_on") == "On":
+        need.append(("time_place", "Time"))
+        groove = values.get("time_groove", "Off")
+        if groove == "Swing":
+            need += [(k, "Time's Swing") for k in ("swing", "swing_unit")]
+        elif groove != "Off":
+            need.append(("time_amount", "Time's " + groove))
+    if values.get("move", "None") != "None":
+        need += [(k, "the Move") for k in ("move_mode", "move_quant")]
+    return need
+
+
 def check_preset_sound(where, values, params):
     """What a factory preset's lines say together, beyond each line on its own (EffectForce's rules, GrooveForce's
-    parts). A preset sets only what it changes: no line at its default, and nothing of a part, a Shape lane or an Echo
-    line it leaves off, unless the Move it selects switches that on. A selected Move needs Time on (its patterns play
-    from Time's ring, which records only once it has been on: R42; the design's rule for every factory preset with
-    Moves). The Output stays within +-OUTPUT_MAX_DB (tools/levels.cpp sets it). `values` maps keys to the lines'
+    parts). Nothing is set on a part, a Shape lane or an Echo line the preset leaves off (a lane's or a line's switch
+    included), unless the Move it selects switches that on; a Move's mode and quantize go with a selected Move. What
+    defines each part that is on is stated (_defines, R56). A selected Move needs Time on: every factory preset with Moves
+    has it, so that the other tiles' Reverse Beat, Spin-Back and Rewind find audio Time has recorded (docs/DESIGN.md,
+    Moves; R42). The Output stays within +-OUTPUT_MAX_DB (tools/levels.cpp sets it). `values` maps keys to the lines'
     values, options by name. Returns the errors."""
     errors = []
     on = {k for k, v in values.items() if k.endswith("_on") and v == "On"}
@@ -1003,24 +1041,24 @@ def check_preset_sound(where, values, params):
         on |= {MOVE_PART_SWITCH[q] for q in mv["parts"]}
         on |= {r["key"] for r in mv["ramps"] if r["kind"] == "set" and r["key"].endswith("_on") and r["value"] == "On"}
         if values.get("time_on") != "On":
-            errors.append("%s: selects the Move %s but leaves Time off (a Move plays from Time's ring)" % (where, move))
+            errors.append("%s: selects the Move %s but leaves Time off (a preset with Moves has Time on, so that Reverse "
+                          "Beat, Spin-Back and Rewind find recorded audio)" % (where, move))
+    else:
+        errors += ["%s: sets %s but selects no Move" % (where, k) for k in ("move_mode", "move_quant") if k in values]
     names = {"pump": "the Pump", "shape": "Shape", "echo": "the Echo", "time": "Time"}
     for key, val in values.items():
-        p = params[key]
-        default = p["options"][p["default"]] if "options" in p else p["default"]
-        if val == default or ("options" not in p and abs(float(val) - p["default"]) < 1e-9):
-            errors.append("%s: %s=%s is its default (a preset sets only what it changes)" % (where, key, val))
         if key == "output" and abs(float(val)) > OUTPUT_MAX_DB + 1e-9:
             errors.append("%s: output=%s: a factory preset's Output stays within +-%g dB (tools/levels.cpp)"
                           % (where, val, OUTPUT_MAX_DB))
-        if key.endswith("_on"):
-            continue
         part = _part_of(key)
-        if part and MOVE_PART_SWITCH[part] not in on:
+        if part and key != MOVE_PART_SWITCH[part] and MOVE_PART_SWITCH[part] not in on:
             errors.append("%s: sets %s but leaves %s off" % (where, key, names[part]))
         own = next((s for s in ("vol_", "flt_", "pan_", "a_", "b_", "c_", "d_") if key.startswith(s)), None)
-        if own and own + "on" not in on:
+        if own and key != own + "on" and own + "on" not in on:
             errors.append("%s: sets %s but leaves %s off" % (where, key, own + "on"))
+    for key, what in _defines(values):
+        if key not in values:
+            errors.append("%s: %s is on but %s is not stated (a preset states what defines it, R56)" % (where, what, key))
     return errors
 
 

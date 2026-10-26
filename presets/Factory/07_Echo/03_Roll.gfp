@@ -1,5 +1,6 @@
 grooveforce 1
 echo_on=On
+echo_route=Parallel
 echo_duck=0.3
 a_on=On
 a_level=0.7

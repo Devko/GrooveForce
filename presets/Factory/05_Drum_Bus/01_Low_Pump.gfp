@@ -1,7 +1,10 @@
 grooveforce 1
 pump_on=On
-pump_band=Lows
-pump_trigger=Input
+pump_rate=1/4
+pump_curve=Smooth
 pump_depth=0.7
 pump_length=0.5
+pump_trigger=Input
+pump_band=Lows
+pump_xover=120
 output=3.1
