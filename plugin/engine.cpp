@@ -26,6 +26,8 @@ void Engine::reset() {
     fresh_ = true;
     echoMoved_ = false;
     echoHold_ = 0;
+    haveUsed_ = false;   // the first chunk after a reset works the knobs out at once, not the Move's last step that was held
+    sinceConvert_ = kConvertGap;
 }
 
 int Engine::pickOf(int id) const {

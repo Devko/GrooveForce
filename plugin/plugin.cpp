@@ -228,7 +228,7 @@ void runBlock(Plugin* p, float* L, float* R, int n, const ef::Transport& tr) {
         p->surface.dropMoveCalls();   // a tap made while it was off is not played when it comes back
         p->engine.reset();
     }
-    MoveCall call;   // the UI thread's taps, GO, Move changes and loads, in the order they were made
+    MoveCall call;   // the UI thread's calls: a load first, then the latest tap, GO or Move change (they coalesce)
     while (p->surface.takeMoveCall(call)) p->engine.moveCall(call);
     p->engine.render(L, R, n, tr);
     p->surface.moveLit(p->engine.litMoves());

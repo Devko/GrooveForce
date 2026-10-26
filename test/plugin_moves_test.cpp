@@ -1175,6 +1175,47 @@ void rampsConvertOncePerBlock() {
     }
 }
 
+// A reset (the slot was switched off for a while) in the middle of a Move's ramp: the first chunk after it is the knobs' alone,
+// not the ramp's last step held for the 1 to 3 chunks the conversion gate would keep it. Filter Drop three beats into its four,
+// a block's frames more by 0, 32, 64 and 96 (the four phases of the gate), reset, one block of noise: the same as an engine
+// that only ever had the knobs and was reset too.
+void resetConvertsTheKnobs() {
+    std::printf("== a reset in the middle of a ramp: the knobs at once\n");
+    float n[P_COUNT];
+    for (int i = 0; i < P_COUNT; ++i) n[i] = PARAM_INFO[i].def;
+    MoveCall fire;
+    fire.kind = MoveCall::kFire;
+    fire.move = moveOf("Filter Drop");
+    for (int extra = 0; extra < kBlock; extra += 32) {
+        Engine e;
+        e.setParams(n);
+        ef::Transport t;
+        t.playing = t.valid = true;
+        e.moveCall(fire);
+        double pos = 1.0;   // beats: the line is beat 2, the Move four beats
+        auto render = [&](Engine& x, const Buf& in, int frames) {
+            Buf l(in.begin(), in.begin() + frames), r = l;
+            t.beats = pos;
+            x.render(l.data(), r.data(), frames, t);
+            return l;
+        };
+        for (int b = 0; b < 3 * kBeat / kBlock; ++b, pos += kBlock / static_cast<double>(kBeat)) render(e, whiteNoise(kBlock, 0.5f, 1 + static_cast<uint32_t>(b)), kBlock);
+        if (extra) {
+            render(e, whiteNoise(extra, 0.5f, 99), extra);
+            pos += extra / static_cast<double>(kBeat);
+        }
+        CHECK(e.litMoves() != 0u);   // (the Move is playing)
+        e.reset();
+        Engine knobs;
+        knobs.setParams(n);
+        knobs.reset();
+        const Buf in = whiteNoise(kBlock, 0.5f, 777);
+        const Buf a = render(e, in, kBlock), b = render(knobs, in, kBlock);
+        if (maxDiff(a, b, 0, kBlock) > 1e-6) std::printf("  %d frames into the gate: the first block after the reset differs by %g\n", extra, maxDiff(a, b, 0, kBlock));
+        CHECK(maxDiff(a, b, 0, kBlock) < 1e-6);
+    }
+}
+
 // R53's cost is a ramp that moves in steps of 128 frames (2.9 ms) instead of 32: Filter Drop on a 2 kHz sine, the filter's
 // cutoff falling two octaves from 6 kHz over its four beats, follows the low-pass's own response (second order, Butterworth)
 // to a percent or so all the way to the end of its ramp, the sine is the sine before and after, and nothing clicks.
@@ -1547,6 +1588,7 @@ void pluginMovesTests() {
     GF_RUN(echoHoldsAfterThrow);
     GF_RUN(echoHoldIsCapped);
     GF_RUN(rampsConvertOncePerBlock);
+    GF_RUN(resetConvertsTheKnobs);
     GF_RUN(rampKeepsItsWay);
     GF_RUN(moveCallsCoalesce);
     GF_RUN(loadAmongCalls);
