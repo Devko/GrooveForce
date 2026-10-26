@@ -143,7 +143,7 @@ void bothHeaviest(AEffect* e) {
 } // namespace
 
 int main() {
-    efl::referenceMix(g_L, g_R);
+    gfl::referenceMix(g_L, g_R);
     g_time.sampleRate = 44100.0;
     g_time.tempo = 128.0;
     g_time.timeSigNumerator = g_time.timeSigDenominator = 4;
