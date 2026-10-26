@@ -118,6 +118,7 @@ MOD_DEPS_shapes := dsp/pump_curves.cpp
 MOD_DEPS_shape := dsp/shapes.cpp dsp/pump_curves.cpp
 MOD_DEPS_pump := dsp/pump_curves.cpp
 MOD_DEPS_groove := dsp/pump.cpp dsp/shape.cpp dsp/shapes.cpp dsp/pump_curves.cpp
+MOD_DEPS_echo_mod := dsp/shapes.cpp dsp/pump_curves.cpp
 MOD_SRC = test/module_main.cpp test/$(M)_test.cpp $(wildcard dsp/$(M).cpp) $(MOD_DEPS_$(M))
 test-module: $(GEN) | $(BUILD)
 	@[ -n "$(M)" ] || { echo "usage: make test-module M=<module>"; exit 1; }
