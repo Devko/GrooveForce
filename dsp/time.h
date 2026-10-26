@@ -42,10 +42,15 @@
 //
 // A jump inside a fade waits for it (at most 5 ms late). A crossfade is never restarted, which would step: if the
 // playhead jumps again while one is going, the head goes on where it was heading until the fade is over, and the jump is
-// made then, from there, however many came meanwhile. A pattern's own jump is scheduled (its fade ends on its line) when it
-// has 5 ms to itself, that is, when the line before it (the previous Jump, or the pattern's start) is 5 ms or more back; the
-// library's are (its closest are 331 samples apart at 999 BPM, the fastest tempo). One that has not is made at its line, as a
-// jump nothing foresaw, and waits like one; so does an end or a lap's wrap with a Jump less than 5 ms before it.
+// made then, from there, however many came meanwhile. The same goes for a pattern's own crossfade (head 1 coming in over
+// head 0, the 5 ms before a Jump or the end): a jump that lands in it, even one that leaves the head that goes on where it
+// was (a cancel in the last Jump's slice, a locate by a whole slice), holds both heads, with the fade's weights, to the line.
+// (A jump is told from the heads, not from the one that goes on alone: each head that is heard, before or now, has to be
+// where it was heading.)
+// A pattern's own jump is scheduled (its fade ends on its line) when it has 5 ms to itself, that is, when the line before
+// it (the previous Jump, or the pattern's start) is 5 ms or more back; the library's are (its closest are 331 samples apart
+// at 999 BPM, the fastest tempo). One that has not is made at its line, as a jump nothing foresaw, and waits like one; so
+// does an end or a lap's wrap with a Jump less than 5 ms before it.
 //
 // With no pattern in range, a lag of 0 and nothing fading, process() leaves the input alone: bit for bit,
 // while the ring records.
@@ -169,6 +174,8 @@ private:
         float w = 0.0f;                  // head 1's weight
         float gain = 1.0f;               // the speed's: min(8 |speed|, 1), the two heads' alike
         float speed = 1.0f;              // frames a sample, of the head that carries on
+        float speed0 = 1.0f;             // and of head 0
+        double left = 0.0;               // samples to the line, while head 1 is fading in
         float vol = 1.0f;                // the pattern's volume, kEdge samples ahead
         bool cut = false;                // a line with no 5 ms of its own to fade in went by at this sample: the head may have jumped
     };
@@ -207,17 +214,24 @@ private:
     double prevStart_ = 0.0, prevLam_ = 0.0, prevSpb_ = 0.0, prevX_ = 0.0;
     double prevPos_ = 0.0;          // where the carrying head read at the last sample (frames)
     float prevSpeed_ = 1.0f;
+    double prev0Pos_ = 0.0;         // where head 0 read, its speed, and how many samples the pattern's own fade (head 1 in) had to go
+    float prev0Speed_ = 1.0f;
+    double prevLeft_ = 0.0;
     bool calm_ = true;              // the playhead is at now, the gain is 1, nothing is fading
 
     // The crossfade for a jump nothing foresaw: the old head plays on at its speed.
     double u_ = 0.0;
     float uSpeed_ = 1.0f;
     int fade_ = 0;
-    // A jump that comes while that crossfade is going waits for its end: the head goes on where it was heading (hp_, at hs_)
-    // for what is left of the fade, and then the jump is made, from there.
+    // A jump that comes while a crossfade is going waits for its end: the head goes on where it was heading (hp_, at hs_)
+    // for what is left of the fade, and then the jump is made, from there. A pattern's own crossfade, head 1 coming in over
+    // head 0, is one: if the jump comes in it, both heads go on (hq_ is head 0, at hqs_) with the fade's weight, hl_ samples to the line.
     bool held_ = false;
     double hp_ = 0.0;
     float hs_ = 1.0f;
+    double hq_ = 0.0;
+    float hqs_ = 1.0f;
+    double hl_ = 0.0;
 
     float g_ = 1.0f;                // the gain
 };
@@ -240,6 +254,10 @@ private:
 // that comes while a crossfade is going waits for its end: TimeCore defers a jump inside a fade (see its header comment).
 // The groove's lines are far enough apart not to wait for each other (a unit is 15 ms at the fastest tempo).
 //
+// A swing's late lag is fixed in samples when its unit first comes to be asked for (as Drunk's and Push's are, in ms), at
+// the tempo of that moment: a tempo ramp inside the unit does not feed it sub-frame steps. It is the next late unit's to
+// follow the tempo.
+//
 // Drunk: a lag per 16th, from a hash of the 16th's index in its bar (0..amount * 15 ms), so it is the same on every bar and
 // wherever MPC loops; each change ends on its 16th's line. Push: a constant lag of amount * 20 ms. Off: no lag, and with
 // no pattern the input passes bit for bit (the ring only records).
@@ -247,7 +265,8 @@ private:
 // A pattern (`pattern` >= 0) overrides the groove while it plays: the groove's lines inside it are not followed (the lag
 // asked is held, and TimeCore's pre-roll starts from it), and its end crossfades back to the lag the groove has at that
 // line. When the pattern ends off a line (after a one shot, or a stop), the groove stays off, the lag 0, until the next
-// unit line, and resumes there. A pattern that goes round by itself ends in a crossfade to the live input, not to the
+// unit line, and resumes there; if the position has gone by the wait by then (it ran out, or an MPC loop took the song back
+// before it), no pattern being asked for, it is over. A pattern that goes round by itself ends in a crossfade to the live input, not to the
 // lag, so one that is not looping and ends on a line resumes on the line after. `loop` repeats the pattern until the
 // caller stops asking (pattern -1): a loopable one by TimeCore's own wrap, any other as a new lap each time, the next lap's
 // 5 ms pre-roll replacing the last lap's end.
@@ -296,8 +315,8 @@ private:
     };
 
     Piece pieceAt(int i, int n);
-    double baseLag(double q, double& until) const;     // the groove's lag, or none while it waits for a line
-    double grooveLag(double q, double& until) const;   // the groove's lag at q beats (5 ms on) and where it next changes
+    double baseLag(double q, double& until);     // the groove's lag, or none while it waits for a line
+    double grooveLag(double q, double& until);   // the groove's lag at q beats (5 ms on) and where it next changes
     double resumeLine(double e, bool strict) const;
     void setZone(double e, bool strict);
 
@@ -316,6 +335,10 @@ private:
     bool armedStrict_ = false;   // it goes round by itself, so its end is a crossfade to live
     bool zoneOn_ = false;
     double zFrom_ = 0.0, zTo_ = 0.0;
+
+    // Swing's late lag, in samples, as it was when its unit first came to be asked for: a tempo ramp inside the unit does not move it.
+    int64_t latchUnit_ = INT64_MIN;
+    double latchNominal_ = 0.0, latchSamples_ = 0.0;
 
     int tail_ = 0;
 };

@@ -25,6 +25,7 @@ using namespace eft;
 using ef::kChunk;
 using ef::kRate;
 using ef::Transport;
+using gf::Time;
 using gf::TimeCore;
 
 constexpr double kBeat = 22050.0;                   // a beat at 120 BPM, in samples
@@ -919,6 +920,147 @@ void timeJumpInFade() {
     }
 }
 
+// A pattern's own crossfade is a fade too: the 5 ms before one of its Jumps (or its end) the output is a blend of two heads, and a jump that lands in it
+// (the pattern cancelled or switched, a locate or a nudge, a tempo change) must hold both to the line, then make its jump from there. The step after the
+// event is held against the playing signal's own steepness: the input's, 1.1 times it, with the room of two crossfades at once.
+enum class Hit { None, Cancel, Switch, Locate, Nudge, Tempo };
+
+size_t around(double lineSample, int off) { return static_cast<size_t>(static_cast<long>(lineSample) + off); }
+
+// Samples from a line to hit at: every `step`th from before its 5 ms fade to after it, and every one at the fade's first and last samples and the line's.
+std::vector<int> sweepOffsets(int step) {
+    std::vector<int> v;
+    for (int off = -260; off <= 30; ++off)
+        if ((off + 260) % step == 0 || (off >= -226 && off <= -212) || (off >= -6 && off <= 6)) v.push_back(off);
+    return v;
+}
+
+// Plays `pat` (from beat `start`) over `in` from `lead` beats before it starts, in chunks of 32, with one thing done at sample `hitAt` (a call begins
+// there), up to 700 samples after it.
+Buf playHit(const Buf& in, int pat, bool loop, double start, double lead, size_t hitAt, Hit hit) {
+    const double spb = 22050.0;
+    size_t i = static_cast<size_t>((start - lead) * spb);
+    Time time;
+    if (!time.allocate()) CHECK(false);   // (not a check a trial: there are thousands)
+    Buf L = in, R = in;
+    double beats = static_cast<double>(i) / spb, bpm = 120.0;
+    Time::Params p;
+    p.pattern = pat;
+    p.patternStart = start;
+    p.loop = loop;
+    const size_t end = hitAt + 700;
+    while (i < end) {
+        size_t n = std::min<size_t>(kChunk, end - i);
+        if (i < hitAt) n = std::min(n, hitAt - i);
+        if (i == hitAt) {
+            switch (hit) {
+            case Hit::None: break;
+            case Hit::Cancel: p.pattern = -1; break;
+            case Hit::Switch: p.pattern = idx("Half-Time Bar"); p.patternStart = beats; p.loop = false; break;
+            case Hit::Locate: beats += 0.5; break;
+            case Hit::Nudge: beats += 0.004; break;   // 88 samples: the same slice, the line that much nearer
+            case Hit::Tempo: bpm = 150.0; break;
+            }
+        }
+        Transport t;
+        t.bpm = bpm;
+        t.beats = beats;
+        t.playing = t.valid = true;
+        time.set(p, t);
+        time.process(&L[i], &R[i], static_cast<int>(n));
+        beats += static_cast<double>(n) * bpm / 60.0 / kRate;
+        i += n;
+    }
+    L.resize(end);
+    return L;
+}
+
+// The largest step from two samples before the hit to the end.
+double stepAfter(const Buf& in, int pat, bool loop, double start, double lead, size_t hitAt, Hit hit) {
+    return maxStep(playHit(in, pat, loop, start, lead, hitAt, hit), hitAt - 2, hitAt + 700);
+}
+
+void timeJumpInScheduledFade() { // a cancel, a switch, a locate, a nudge and a tempo change across the 5 ms before a Jump, and before a one shot's end
+    const double start = 2.0;
+    const char* const names[] = {"Stutter 1/8", "Stutter 1/16", "Stutter 1/32", "Reverse Stutter", "Roll Build 1 Bar"};
+    const Hit hits[] = {Hit::Cancel, Hit::Switch, Hit::Locate, Hit::Nudge, Hit::Tempo};
+    const auto firstLine = [](int p) {   // the first Jump a tenth of a beat in or later, in beats from the start
+        const gf::TimePatternDef& d = gf::timePatternDef(p);
+        for (int k = 0; k < d.srcCount; ++k)
+            if (gf::kTimePoints[d.srcFirst + k].seg == gf::TSeg::Jump && gf::kTimePoints[d.srcFirst + k].x >= 0.1) return static_cast<double>(gf::kTimePoints[d.srcFirst + k].x);
+        return 0.0;
+    };
+    {   // broadband: five tones, so the heads of different lags differ by about as much as they can
+        Buf in(static_cast<size_t>(5 * kBeat));
+        for (size_t i = 0; i < in.size(); ++i) {
+            double v = 0.0;
+            for (double f : {300.0, 523.0, 811.0, 1217.0, 1777.0}) v += 0.1 * std::sin(2.0 * kPi * f * static_cast<double>(i) / kRate + f);
+            in[i] = static_cast<float>(v);
+        }
+        const double bound = 1.1 * maxStep(in, 1, in.size()) + 0.04;
+        for (const char* name : names) {
+            const int p = idx(name);
+            const double line = firstLine(p);
+            CHECK(line > 0.0);
+            const double lineSample = (start + line) * kBeat;
+            for (const Hit hit : hits) {
+                double worst = 0.0;
+                int worstOff = 0;
+                for (const int off : sweepOffsets(5)) {   // before the fade, in it from its first sample to its last, and after the line
+                    const double s = stepAfter(in, p, true, start, 0.1, around(lineSample, off), hit);
+                    if (s > worst) {
+                        worst = s;
+                        worstOff = off;
+                    }
+                }
+                CHECK(worst <= bound);
+                if (!(worst <= bound))
+                    std::printf("  %s, hit %d: a step of %.4f at %+d samples from the line, the bound %.4f\n", name, static_cast<int>(hit), worst, worstOff, bound);
+            }
+            // And the jump waits: what is heard from the hit to the line is the fade as it would have gone, both heads on their way and its weights
+            // (a Line goes on as it was going; nothing but the timing of the jump was changed).
+            bool held = true;
+            for (const int off : {-200, -120, -40}) {
+                const size_t hitAt = around(lineSample, off);
+                const Buf ref = playHit(in, p, true, start, 0.1, hitAt, Hit::None);
+                for (const Hit hit : hits) {
+                    const Buf out = playHit(in, p, true, start, 0.1, hitAt, hit);
+                    for (size_t i = hitAt; i + 2 < static_cast<size_t>(lineSample); ++i)
+                        if (!near(out[i], ref[i], 2e-5)) held = false;
+                }
+            }
+            CHECK(held);
+            if (!held) std::printf("  %s: a jump in its fade changed what is heard before the line\n", name);
+        }
+    }
+    {   // a tone whose heads are in antiphase: Stutter 1/32's slice (2756.25 samples) is 29.5 cycles of 472 Hz
+        const double hz = 472.0;
+        const Buf in = sine(hz, static_cast<int>(5 * kBeat), 0.5f);
+        const double bound = clickBound(hz, 1.0);
+        const double lineSample = (start + 0.125) * kBeat;
+        for (const Hit hit : hits) {
+            double worst = 0.0;
+            for (const int off : sweepOffsets(6))
+                worst = std::max(worst, stepAfter(in, idx("Stutter 1/32"), true, start, 0.1, around(lineSample, off), hit));
+            CHECK(worst <= bound);
+            if (!(worst <= bound)) std::printf("  antiphase, hit %d: a step of %.4f, the bound %.4f\n", static_cast<int>(hit), worst, bound);
+        }
+    }
+    {   // a one shot's end is the same kind of line: Reverse Beat, across the 5 ms before its end
+        const double hz = 472.0;
+        const Buf in = sine(hz, static_cast<int>(5 * kBeat), 0.5f);
+        const double bound = clickBound(hz, 1.0);
+        const double lineSample = (start + 1.0) * kBeat;
+        for (const Hit hit : {Hit::Cancel, Hit::Locate, Hit::Nudge, Hit::Tempo}) {
+            double worst = 0.0;
+            for (const int off : sweepOffsets(6))
+                worst = std::max(worst, stepAfter(in, idx("Reverse Beat"), false, start, 1.1, around(lineSample, off), hit));
+            CHECK(worst <= bound);
+            if (!(worst <= bound)) std::printf("  the end of Reverse Beat, hit %d: a step of %.4f, the bound %.4f\n", static_cast<int>(hit), worst, bound);
+        }
+    }
+}
+
 // Patterns whose lines are closer than the library lets any be (the library's own are 331 samples apart at the fastest tempo, 999 BPM):
 // a jump with no 5 ms to itself since the line before it (or the pattern's start) is not scheduled but made at its line, and waits
 // if a fade is going. Four of them, at 120 BPM (a beat is 22050 samples, g is 60 of them, h is 80).
@@ -1460,7 +1602,10 @@ void timePatternLag() { // a pattern over a lag > 0: it starts out of the lag (a
             if (!near(out[i], in[2 * S - i], 1e-6)) inside = false;
         CHECK(pre);
         CHECK(inside);
-        for (size_t i = S - 3000; i < S - kFade; ++i) CHECK(near(out[i], interp(in, static_cast<double>(i) - lag), 3e-6));   // the lag until then
+        bool held = true;   // the lag until then
+        for (size_t i = S - 3000; i < S - kFade; ++i)
+            if (!near(out[i], interp(in, static_cast<double>(i) - lag), 3e-6)) held = false;
+        CHECK(held);
     }
     {   // beat 2.25 to 3.25, two late lines: the groove was on time, and the pattern ends back in the late lag
         const Buf out = render105(2.25);
@@ -1573,6 +1718,34 @@ void timePatternLoops() { // loop: a pattern repeats until the caller stops aski
 
 // --- the contract ------------------------------------------------------------------------------------
 
+void timeZoneLapses() { // the wait after a pattern is over when the position has gone by it: an MPC loop over the place again sees the groove
+    const Buf in = whiteNoise(static_cast<int>(4 * 88200), 0.5f, 7);
+    struct Case { const char* what; size_t loop; double cancel; };   // the loop's length in samples, where in it the pattern is cancelled (beats)
+    const Case cases[] = {
+        {"cancelled in a late unit, the loop goes on past the wait", 88200, 0.85},
+        {"cancelled late in the loop", 88200, 2.9},
+        {"cancelled in a late unit, the loop wraps inside the wait", 19845, 0.85},   // 0.9 beat: the position goes back before the wait is over
+    };
+    for (const Case& c : cases) {
+        const Buf ref = renderTime(in, fixed(swingParams(0.66, 0.25)), 120.0, kChunk, c.loop);   // a run that never had a pattern
+        const Buf out = renderTime(in, [&](size_t i) {
+            Time::Params p = swingParams(0.66, 0.25);
+            if (i < c.loop && static_cast<double>(i) / kBeat < c.cancel) {   // the first pass only: Stutter 1/16, looping, from the start of the loop
+                p.pattern = idx("Stutter 1/16");
+                p.patternStart = 0.0;
+                p.loop = true;
+            }
+            return p;
+        }, 120.0, kChunk, c.loop);
+        double worst = 0.0;
+        for (size_t pass = 1; pass * c.loop + 3000 < in.size(); ++pass)
+            for (size_t i = pass * c.loop + 3000; i < std::min(in.size(), (pass + 1) * c.loop); ++i)
+                worst = std::max(worst, static_cast<double>(std::fabs(out[i] - ref[i])));
+        CHECK(worst < 1e-5);   // every pass after the first is the groove, as if no pattern had ever been
+        if (!(worst < 1e-5)) std::printf("  %s: %.4f from a run that never had a pattern\n", c.what, worst);
+    }
+}
+
 void timeGrooveNoClicks() { // a sine through every groove, and through every switch of groove and of amount: no step beyond a crossfade's
     const double hz = 457.0;
     const Buf in = sine(hz, static_cast<int>(at(16.0)), 0.5f);
@@ -1658,7 +1831,7 @@ void timeTempoRamp() { // the tempo moves under a groove: every line still ends 
                 w += L[i];
                 m += static_cast<double>(i) * L[i];
             }
-            if (!(std::fabs(w - 1.0) < (which ? 0.4 : 1e-3))) {   // (Swing follows the tempo: a position jump of up to 0.4 sample a chunk)
+            if (!(std::fabs(w - 1.0) < 1e-3)) {
                 if (once) std::printf("  interval %zu (sample %zu): weight %.5f\n", k, lines[k], w);
                 once = false;
             }
@@ -1858,6 +2031,7 @@ void timeTests() {
     timeReset();
     timeRobust();
     timeJumpInFade();
+    timeJumpInScheduledFade();
     timeCloseJumps();
     timeSwing();
     timeSwingCrossfade();
@@ -1867,6 +2041,7 @@ void timeTests() {
     timePatternOverGroove();
     timePatternLag();
     timePatternLoops();
+    timeZoneLapses();
     timeGrooveNoClicks();
     timeTempoRamp();
     timeGrooveChunking();

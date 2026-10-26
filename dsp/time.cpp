@@ -41,6 +41,15 @@ void bindCurve(TimeCurve& c, int pattern, bool volume) {
 // The level a head plays at for its speed: the looper's, a tape stop ends in silence.
 float speedGain(double speed) { return std::min(std::fabs(static_cast<float>(speed)) * 8.0f, 1.0f); }
 
+// Whether the heads now (pos0, with p1 coming in at weight wNew) go on the sound the heads were making (e0, with e1 coming in at wOld): each
+// head that counts, in either, is where it was heading, and a weight that counts has not been moved. A head with next to no weight is not heard.
+bool carriesOn(double pos0, double p1, double wNew, double e0, double e1, double wOld) {
+    constexpr double kUnheard = 1e-3;
+    if ((1.0 - wNew > kUnheard || 1.0 - wOld > kUnheard) && std::fabs(pos0 - e0) > kHalfFrame) return false;
+    if ((wNew > kUnheard || wOld > kUnheard) && std::fabs(p1 - e1) > kHalfFrame) return false;
+    return !(std::fabs(e0 - e1) > kHalfFrame && std::fabs(wNew - wOld) > 0.01);
+}
+
 } // namespace
 
 // --- the patterns ---------------------------------------------------------------------------------
@@ -176,6 +185,8 @@ void TimeCore::reset() {
     calm_ = true;
     fade_ = 0;
     held_ = false;
+    hl_ = 0.0;
+    prevLeft_ = 0.0;
     g_ = 1.0f;
 }
 
@@ -224,6 +235,7 @@ void TimeCore::headsAt(bool inPattern, double x, double lag, Heads& h) {
         lag1 = std::clamp(lag1, 0.0, TimeCore::kMaxLagBeats);
         const float w = static_cast<float>(0.5 + 0.5 * std::cos(kPi * remaining));
         h.lag1 = lag1;
+        h.left = remaining * TimeCore::kFade;
         h.w = lag1 != h.lag0 ? w : 0.0f;
         h.gain += (speedGain(speed1) - h.gain) * w;
         h.speed = static_cast<float>(speed1);
@@ -253,7 +265,7 @@ void TimeCore::headsAt(bool inPattern, double x, double lag, Heads& h) {
     const double speed = src_.slope(xl);
     h.lag0 = std::clamp(xl - src_.value(xl), 0.0, TimeCore::kMaxLagBeats);
     h.lag1 = h.lag0;
-    h.speed = static_cast<float>(speed);
+    h.speed = h.speed0 = static_cast<float>(speed);
     h.gain = speedGain(speed);
 
     double landsAt = 0.0, slopeAfter = 1.0;
@@ -341,6 +353,7 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
         prevSpb_ = spb;
         prevPos_ = static_cast<double>(abs_ - 1);
         prevSpeed_ = 1.0f;
+        prevLeft_ = 0.0;
         return;
     }
 
@@ -355,6 +368,9 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     Heads h;
     double carry = prevPos_;    // where the head that goes on read at the sample before: the one that is heard past any line
     float speed = prevSpeed_;   // and how fast it was going
+    double carry0 = prev0Pos_;  // where head 0 read, how fast, and how far from the line the pattern's own fade was
+    float speed0 = prev0Speed_;
+    double left = prevLeft_;
     for (int i = 0; i < n; ++i) {
         const int64_t now = a0 + i;
         headsAt(inRange, x0 + i * bps, lam, h);
@@ -362,23 +378,34 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
         const bool two = h.w > 0.0f;
         const double pos1 = static_cast<double>(now) - h.lag1 * spb;
         double here = two ? pos1 : pos0;   // the head that goes on past the line
-        if (held_ && fade_ == 0) {
-            // The fade a jump waited for is over: the jump is made now, from where the head was held.
+        const double wNew = two ? static_cast<double>(h.w) : 0.0;
+        if (held_ && fade_ == 0 && hl_ <= 0.0) {
+            // The fades a jump waited for are over: the jump is made now, from where the head was held.
             held_ = false;
-            if (std::fabs(here - hp_) > kHalfFrame) {
+            hl_ = 0.0;
+            if (!carriesOn(pos0, here, wNew, hp_, hp_, 0.0)) {
                 u_ = hp_;
                 uSpeed_ = hs_;
                 fade_ = TimeCore::kFade;
             }
         } else if (!held_ && have && (!checked || h.cut)) {
-            const double expected = carry + static_cast<double>(speed);
-            if (std::fabs(here - expected) > kHalfFrame) {   // it jumped: the old head plays on and crossfades
-                if (fade_ > 0) {   // a fade is going: the jump waits for it, the head going on where it was heading
+            // Where the heads would be but for the jump: the head that goes on (e1), and head 0 if the pattern's own fade the sample before
+            // (toGo samples from its line, now) was not over (e0, and that fade's weight on e1).
+            const double toGo = left - 1.0;
+            const bool fadingOld = toGo > 0.0;
+            const double e1 = carry + static_cast<double>(speed);
+            const double e0 = fadingOld ? carry0 + static_cast<double>(speed0) : e1;
+            const double wOld = fadingOld ? 0.5 + 0.5 * std::cos(kPi * toGo / TimeCore::kFade) : 0.0;
+            if (!carriesOn(pos0, here, wNew, e0, e1, wOld)) {   // it jumped: the old head(s) play on and crossfade
+                if (fade_ > 0 || fadingOld) {   // a fade is going: the jump waits for it, the head(s) going on where they were heading
                     held_ = true;
-                    hp_ = expected;
+                    hp_ = e1;
                     hs_ = speed;
+                    hl_ = fadingOld ? toGo : 0.0;
+                    hq_ = e0;
+                    hqs_ = speed0;
                 } else {
-                    u_ = expected;
+                    u_ = e1;
                     uSpeed_ = speed;
                     fade_ = TimeCore::kFade;
                 }
@@ -388,6 +415,15 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
         float l, r;
         if (held_) {
             read(hp_, now, l, r);
+            if (hl_ > 0.0) {   // head 1 still coming in over head 0, on the pattern's own weights
+                float l0, r0;
+                read(hq_, now, l0, r0);
+                const float w = static_cast<float>(0.5 + 0.5 * std::cos(kPi * hl_ / TimeCore::kFade));
+                l = l0 * (1.0f - w) + l * w;
+                r = r0 * (1.0f - w) + r * w;
+                hq_ += static_cast<double>(hqs_);
+                hl_ -= 1.0;
+            }
             here = hp_;
             hp_ += static_cast<double>(hs_);
         } else {
@@ -413,6 +449,9 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
         R[i] = r * g_;
         carry = here;
         speed = held_ ? hs_ : h.speed;
+        carry0 = pos0;
+        speed0 = h.speed0;
+        left = two ? h.left : 0.0;
         have = true;
     }
 
@@ -423,6 +462,9 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     prevX_ = x1;
     prevPos_ = carry;
     prevSpeed_ = speed;
+    prev0Pos_ = carry0;
+    prev0Speed_ = speed0;
+    prevLeft_ = left;
     calm_ = h.lag0 == 0.0 && h.w == 0.0f && g_ == 1.0f && fade_ == 0 && !held_;
 }
 
@@ -458,12 +500,13 @@ void Time::reset() {
     lastLag_ = 0.0;
     armed_ = false;
     zoneOn_ = false;
+    latchUnit_ = INT64_MIN;
     tail_ = 0;
 }
 
 // The groove's lag, in beats, for the sample whose position 5 ms on is q (so a change is asked for 5 ms before its
 // line and ends on it), and the position where it next changes (HUGE_VAL: never).
-double Time::grooveLag(double q, double& until) const {
+double Time::grooveLag(double q, double& until) {
     until = HUGE_VAL;
     switch (p_.groove) {
     case kSwing: {
@@ -473,8 +516,16 @@ double Time::grooveLag(double q, double& until) const {
         const double unitNo = ef::floorFast(q / u);
         if (!(std::fabs(unitNo) < kFar)) return 0.0;
         until = (unitNo + 1.0) * u;
-        // the second unit of a pair (an odd unit) is the late one: the lag is how much later it starts than its straight line
-        return (static_cast<uint64_t>(static_cast<int64_t>(unitNo)) & 1u) ? split - u : 0.0;
+        // the second unit of a pair (an odd unit) is the late one: the lag is how much later it starts than its straight line,
+        // fixed in samples when the unit first comes to be asked for (as Drunk's and Push's are), whatever the tempo does after
+        const int64_t unit = static_cast<int64_t>(unitNo);
+        if (!(static_cast<uint64_t>(unit) & 1u)) return 0.0;
+        if (unit != latchUnit_ || split - u != latchNominal_) {
+            latchUnit_ = unit;
+            latchNominal_ = split - u;
+            latchSamples_ = latchNominal_ / bps_;
+        }
+        return latchSamples_ * bps_;
     }
     case kDrunk: {
         if (!(p_.amount > 0.0f)) return 0.0;
@@ -493,7 +544,7 @@ double Time::grooveLag(double q, double& until) const {
 
 // What is asked of the playhead when no pattern holds it: the groove, except while it waits for its next line after a
 // pattern (lag 0 on [zFrom_, zTo_)).
-double Time::baseLag(double q, double& until) const {
+double Time::baseLag(double q, double& until) {
     if (zoneOn_ && q >= zFrom_ && q < zTo_) {
         until = zTo_;
         return 0.0;
@@ -561,6 +612,9 @@ void Time::set(const Params& in, const ef::Transport& t) {
         const double e = std::min(armedEnd_, pos_);
         setZone(e, armedStrict_ && armedEnd_ <= pos_);
     }
+
+    // A wait for a line that the position has gone by (an MPC loop took it back, or on past) is over, if no pattern is asked for.
+    if (p_.pattern < 0 && zoneOn_ && (pos_ >= zTo_ || pos_ < zFrom_ - tfb_)) zoneOn_ = false;
 
     // The tail: the groove's longest lag, or a pattern's reach back, and a crossfade.
     double lag = 0.0;
