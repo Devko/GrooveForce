@@ -888,6 +888,66 @@ void shapeTail() {
     CHECK(n.tailSamples() == 0);
 }
 
+// copyStateFrom() (ruling R48): a Shape that begins while its twin has been running begins as a copy of it: the lanes
+// are where the twin's are, on a stopped transport too, so both move alike from the next sample whatever the audio.
+// What the audio left in the filter is not copied: the copy has no ring where the twin has one.
+void shapeCopyState() {
+    P p;
+    lane(p, Shape::kVolume, "Square", 1.0, 0.8f);
+    lane(p, Shape::kPan, "Triangle", 2.0, 0.5f);
+    lane(p, Shape::kFilter, "Sine", 1.0, 1.0f);
+    p.cutoffHz = 300.0f;
+    p.resonance = 0.9f;
+    p.filterType = Shape::kLP;
+    const size_t cut = 8192 + 96, total = 40000;
+    const Transport t = transport(120.0, 8.0, false);   // stopped: a fresh one starts its grid over
+    const Buf x = whiteNoise(static_cast<int>(total), 0.5f, 5);
+    // Without the filter lane the copy and the twin move in step on other audio: the gains are the same.
+    P gains = p;
+    gains.lane[Shape::kFilter].on = false;
+    Shape a, b, fresh;
+    Buf La = x, Ra = x, Lb(total, 0.5f), Rb = Lb, Lf = Lb, Rf = Lb;
+    for (size_t pos = 0; pos < total; pos += kChunk) {
+        const int n = static_cast<int>(std::min(static_cast<size_t>(kChunk), total - pos));
+        if (pos == cut) b.copyStateFrom(a);
+        a.set(gains, t);
+        a.process(&La[pos], &Ra[pos], n);
+        if (pos >= cut) {
+            b.set(gains, t);
+            b.process(&Lb[pos], &Rb[pos], n);
+            fresh.set(gains, t);
+            fresh.process(&Lf[pos], &Rf[pos], n);
+        }
+    }
+    // (La is the twin on noise, Lb the copy on DC 0.5: compare the gain, the twin's output over its input)
+    double worst = 0.0, apart = 0.0;
+    for (size_t i = cut + 64; i < total; ++i) {
+        if (std::fabs(x[i]) > 0.05f) worst = std::max(worst, static_cast<double>(std::fabs(La[i] / x[i] - Lb[i] / 0.5f)));
+        apart = std::max(apart, static_cast<double>(std::fabs(Lb[i] - Lf[i])));
+    }
+    CHECK(worst < 1e-5);
+    CHECK(apart > 0.1);
+
+    // With the filter: silence in both, and only the twin rings.
+    Shape c, d;
+    Buf Lx = x, Rx = x;
+    for (size_t pos = 0; pos < 16384; pos += kChunk) {
+        c.set(p, t);
+        c.process(&Lx[pos], &Rx[pos], kChunk);
+    }
+    d.copyStateFrom(c);
+    Buf zc(600, 0.0f), zd(600, 0.0f), zcr = zc, zdr = zd;
+    for (size_t pos = 0; pos < 600; pos += kChunk) {
+        const int n = static_cast<int>(std::min<size_t>(kChunk, 600 - pos));
+        c.set(p, t);
+        c.process(&zc[pos], &zcr[pos], n);
+        d.set(p, t);
+        d.process(&zd[pos], &zdr[pos], n);
+    }
+    CHECK(peak(zc) > 1e-3f);    // the twin's filter rings on
+    CHECK(peak(zd) == 0.0f);    // the copy's has nothing in it
+}
+
 } // namespace
 
 void shapeTests() {
@@ -911,4 +971,5 @@ void shapeTests() {
     shapeNoClicks();
     shapeReset();
     shapeTail();
+    shapeCopyState();
 }

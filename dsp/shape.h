@@ -91,6 +91,16 @@ public:
     void process(float* L, float* R, int n);
     int tailSamples() const { return tail_; }   // 0 unless the filter lane is on (then its ring)
 
+    // Starts as another Shape is now (ruling R48): the instance that begins while its twin has been running (the
+    // wet's Shape of a part on All) takes the twin's lane positions, slews and filter settings, so the two move
+    // alike from the next sample. What the audio left in the filter is not taken, since it is the other bus's
+    // signal: the filter is linear, so the twin keeps its own ring and this one starts with none, and the two
+    // together are what one filter on the sum would be.
+    void copyStateFrom(const Shape& o) {
+        *this = o;
+        s_.clear();
+    }
+
 private:
     // A value that goes in a straight line across a chunk: the sample i of it is cur + step i.
     struct Line {
