@@ -43,10 +43,11 @@
 // the key per chunk, and gives each line's modulator what they found: nextShared(p, t, n, onset, level)
 // is next() with the onset (the offset in the chunk of the detector's first onset, or -1) and the follower's
 // level instead of the key; it does the same as next() would have with a detector and a follower of its
-// own fed the same key, bit for bit (checked in the tests), and each line's Env still falls at its own
-// rate and warms up for 60 ms after its own reset() or pick. The shared detector is the Echo's to keep
-// running (no reset while audio runs) and its sensitivity is the Echo's: Params::sensitivity is read by
-// next() only.
+// own that started with the Echo's and were fed the same key, bit for bit (checked in the tests), and each
+// line's Env still falls at its own rate and warms up for 60 ms after its own reset() or pick. The shared
+// detector and follower are the Echo's to keep running: they run while some line needs them, and start from
+// nothing (reset) when they resume after chunks they skipped, as a follower picked in next() does; their
+// sensitivity is the Echo's: Params::sensitivity is read by next() only.
 //
 // Header only, no allocation, nothing that locks: the audio thread can call next() on any chunk.
 #include "common.h"

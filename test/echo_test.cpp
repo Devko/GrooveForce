@@ -317,13 +317,29 @@ void echoRing() {        // A <- x + yD, B <- yA, C <- yB, D <- yC: the hit goes
         CHECK(near(w.l[hits[k]], want, 0.01));
     }
     CHECK(quietExcept(w.l, hits, 2000) < 0.003f);
-    // With one line off the ring is a chain: D off, the hit goes A, B, C and stops.
+    // With a line off the ring closes over the others (R46): D off, the hit goes A, B, C, A, B, C ... (a trip is 26460).
     P q = p;
     q.line[3].on = false;
     Rig f;
+    const size_t delays3[3] = {13230, 6615, 6615};
+    std::vector<size_t> hits3;
+    t = at;
+    for (size_t k = 0; k < 12; ++k) {
+        t += delays3[k % 3];
+        hits3.push_back(t);
+    }
     const Wet v = run(f, q, impulseAt(110000, static_cast<int>(at)));
-    CHECK(near(v.l[hits[0]], kH0, 0.01) && near(v.l[hits[1]], kH0 * kH0, 0.01) && near(v.l[hits[2]], std::pow(kH0, 3), 0.01));
-    CHECK(quietExcept(v.l, {hits[0], hits[1], hits[2]}, 2000) < 0.003f);
+    for (size_t k = 0; k < hits3.size(); ++k) CHECK(near(v.l[hits3[k]], std::pow(kH0, static_cast<double>(k + 1)), 0.01));
+    CHECK(quietExcept(v.l, hits3, 2000) < 0.003f);
+    // The send goes to the first line that is on: A off, the ring is B, C, D and the hit enters at B.
+    P r = p;
+    r.line[0].on = false;
+    Rig g;
+    const Wet u = run(g, r, impulseAt(110000, static_cast<int>(at)));
+    std::vector<size_t> hitsBCD;
+    for (size_t k = 1; k <= 16; ++k) hitsBCD.push_back(at + 6615 * k);   // B, C, D, B ... all 6615 apart
+    for (size_t k = 0; k < hitsBCD.size(); ++k) CHECK(near(u.l[hitsBCD[k]], std::pow(kH0, static_cast<double>(k + 1)), 0.01));
+    CHECK(quietExcept(u.l, hitsBCD, 2000) < 0.003f);
 }
 
 void echoLoopScale() {   // R36: what a routing passes on is scaled by the source's loopScale(); what is heard is not
@@ -384,57 +400,80 @@ void echoRingFeedback() {
         }
         CHECK(quietExcept(w.l, hits, 2000) < 0.003f);
     }
-    {   // a line alone in a Ring makes one repeat, whatever its feedback: it has none of its own
+    {   // a line alone in a Ring feeds itself at its feedback (R46): it is a line with that feedback
         Rig e;
         P p;
         on(p, 0, k8, 0.8f);
         p.routing = Echo::kRing;
-        const Wet w = run(e, p, impulseAt(60000, 100));
-        CHECK(near(w.l[100 + 13230], kH0, 0.01) && quietExcept(w.l, {100 + 13230}, 2000) < 0.003f);
+        const Wet w = run(e, p, impulseAt(100000, 100));
+        std::vector<size_t> alone;
+        for (size_t k = 1; k <= 7; ++k) {
+            alone.push_back(100 + 13230 * k);
+            const double want = std::pow(kH0, static_cast<double>(k)) * std::pow(0.8, static_cast<double>(k - 1));
+            CHECK(near(w.l[alone.back()], want, 0.003 + 0.01 * want));
+        }
+        CHECK(quietExcept(w.l, alone, 2000) < 0.01f);
+        // and the same as the line with that feedback in a Parallel (noise in, filter off)
+        const Buf noise = whiteNoise(3 * kSr, 0.3f, 60);
+        Rig f, g;
+        P par = p;
+        par.routing = Echo::kParallel;
+        const Wet a = run(f, p, noise), b = run(g, par, noise);
+        if (maxDiff(a.l, b.l) > 1e-5) std::printf("  a lone line in a Ring against a line: differs by %g\n", maxDiff(a.l, b.l));
+        CHECK(maxDiff(a.l, b.l) < 1e-5 && maxDiff(a.r, b.r) < 1e-5);
     }
     const double ms[4] = {100.0, 150.0, 80.0, 120.0};   // 450 ms round
-    {   // 0.9 on all four: the ring dies away (0.66 a trip) and never reaches a limiter, so it is linear in the input
+    // The ring closes over the lines that are on (R46): all four, A B D, B C and D alone, each at 0.9: it dies away (0.9 a trip a line)
+    // and never reaches a limiter, so it is linear in the input.
+    const unsigned masks[4] = {0xF, 0xB, 0x6, 0x8};
+    for (unsigned mask : masks) {
         Wet w[2];
-        float stored = 0.0f;
         for (int k = 0; k < 2; ++k) {
             Rig e;
             P p;
             p.routing = Echo::kRing;
-            for (int i = 0; i < 4; ++i) onFree(p, i, static_cast<float>(ms[i]), 0.9f);
+            for (int i = 0; i < 4; ++i)
+                if (mask >> i & 1) onFree(p, i, static_cast<float>(ms[i]), 0.9f);
             Buf x = silence(15 * kSr);
-            const Buf noise = whiteNoise(kSr, k ? 0.2f : 0.1f, 40);
+            const Buf noise = whiteNoise(kSr, k ? 0.1f : 0.05f, 40);
             std::copy(noise.begin(), noise.end(), x.begin());
             w[k] = run(e, p, x);
-            stored = std::max(stored, e.peakStored());
         }
         double worst = 0.0;
         for (size_t i = 0; i < w[0].l.size(); ++i) worst = std::max(worst, static_cast<double>(std::fabs(w[1].l[i] - 2.0f * w[0].l[i])));
-        CHECK(stored <= 1.0f && worst < 1e-5);
-        CHECK(rms(w[0].l, kSr / 2, kSr) > 0.02);                              // it rings
+        // (linear to the last bit: the 0.2 run is twice the 0.1 run, so no limiter ever acted)
+        if (!(worst < 1e-5 && rms(w[0].l, 14 * kSr, 15 * kSr) < 1e-3 * rms(w[0].l, kSr / 2, kSr)))
+            std::printf("  ring of mask %x at 0.9: linearity %g\n", mask, worst);
+        CHECK(worst < 1e-5);
+        CHECK(rms(w[0].l, kSr / 2, kSr) > 0.01);                                      // it rings
         CHECK(rms(w[0].l, 14 * kSr, 15 * kSr) < 1e-3 * rms(w[0].l, kSr / 2, kSr));   // and dies
     }
-    {   // 1 on all four holds for 60 s without growing (the low cut takes a little a pass); never over the limiter
+    // 1 on all the lines that are on holds without growing (the low cut takes a little a pass), 60 s with four, 30 s with 3, 2 and 1;
+    // the energy late against early within 1 dB, never over the limiter.
+    const struct { unsigned mask; int blocks; } holds[4] = {{0xF, 600}, {0xB, 300}, {0x5, 300}, {0x2, 300}};
+    for (const auto& h : holds) {
         Rig e;
         P p;
         p.routing = Echo::kRing;
-        for (int i = 0; i < 4; ++i) onFree(p, i, static_cast<float>(ms[i]), 1.0f);
+        for (int i = 0; i < 4; ++i)
+            if (h.mask >> i & 1) onFree(p, i, static_cast<float>(ms[i]), 1.0f);
         const int block = 4410;
         double early = 0.0, late = 0.0;
         float top = 0.0f;
         bool finite = true;
         Wet w;
-        for (int b = 0; b < 600; ++b) {
+        for (int b = 0; b < h.blocks; ++b) {
             const Buf L = b < 5 ? whiteNoise(block, 0.3f, 100 + static_cast<uint32_t>(2 * b)) : silence(block);
             const Buf R = b < 5 ? whiteNoise(block, 0.3f, 101 + static_cast<uint32_t>(2 * b)) : silence(block);
             go(e, p, L, R, L, R, w, 0, static_cast<size_t>(block), tempo());
             finite = finite && allFinite(w.l) && allFinite(w.r);
             top = std::max({top, peak(w.l), peak(w.r)});
             if (b >= 100 && b < 110) early += rms(w.l) * rms(w.l);
-            if (b >= 570 && b < 580) late += rms(w.l) * rms(w.l);
+            if (b >= h.blocks - 30 && b < h.blocks - 20) late += rms(w.l) * rms(w.l);
         }
-        if (!(late <= 1.001 * early && late > 0.05 * early)) std::printf("  ring held: %g late against %g early\n", late, early);
+        if (!(late <= 1.001 * early && late > 0.79 * early)) std::printf("  ring held (mask %x): %g late against %g early\n", h.mask, late, early);
         CHECK(finite && top <= 8.0f && e.peakStored() <= 1.00001f);
-        CHECK(late <= 1.001 * early && late > 0.05 * early);
+        CHECK(late <= 1.001 * early && late > 0.79 * early);   // (within 1 dB)
     }
     {   // the freeze takes the feedbacks to 1: the passes after it hold their size
         Rig e;
@@ -451,6 +490,158 @@ void echoRingFeedback() {
         CHECK(near(pass(1), kH0, 0.01) && near(pass(2), 0.5 * kH0 * kH0, 0.01) && near(pass(3), 0.25 * std::pow(kH0, 3), 0.01));
         for (size_t k = 4; k <= 10; ++k) CHECK(near(db(pass(k) / pass(3)), 0.0, 0.3));
     }
+}
+
+// R44: frozen, the lines hold what they have in every routing: the feeds between them stop, as the send does, and nothing grows.
+void echoFreezeRoutings() {
+    const int n = 25 * kSr;
+    Buf in = silence(n);
+    for (int k = 0; k < 16; ++k) {   // a hat pattern: sixteenths of a decaying noise burst, two seconds
+        const Buf b = whiteNoise(1500, 0.6f, 50 + static_cast<uint32_t>(k));
+        for (int i = 0; i < 1500; ++i) in[static_cast<size_t>(k * 5512 + i)] = b[static_cast<size_t>(i)] * static_cast<float>(std::exp(-i / 300.0));
+    }
+    const size_t F = 3 * kSr - (3 * kSr) % kChunk;
+    const double beats[4] = {0.75, 0.5, 0.375, 1.25};
+    for (int routing : {Echo::kParallel, Echo::kSerial, Echo::kPairs, Echo::kSpread})
+        for (int filter = 0; filter < 3; ++filter) {   // none, a band-pass at 5 kHz, and a resonant one
+            Rig e;
+            P p;
+            p.routing = routing;
+            for (int i = 0; i < 4; ++i) {
+                Echo::Line& l = on(p, i, beats[i], 0.45f);
+                l.pan = i % 2 ? 0.6f : -0.6f;
+                if (filter) {
+                    l.p.filterType = gf::EchoLine::kBP;
+                    l.p.cutoffHz = 5000.0f;
+                    l.p.resonance = filter == 2 ? 0.6f : 0.0f;
+                }
+            }
+            Wet w;
+            go(e, p, in, in, in, in, w, 0, F, tempo(120.0));
+            P f = p;
+            f.freeze = true;
+            go(e, f, in, in, in, in, w, F, in.size(), tempo(120.0));
+            const double early = rms(w.l, 4 * kSr, 6 * kSr) + rms(w.r, 4 * kSr, 6 * kSr);
+            const double late = rms(w.l, 22 * kSr, 24 * kSr) + rms(w.r, 22 * kSr, 24 * kSr);
+            const double drift = db(late / early);
+            if (!(drift < 1.0 && drift > -12.0 && e.peakStored() < 0.95f))
+                std::printf("  frozen, routing %d, filter %d: %.1f dB over 18 s, stored %g\n", routing, filter, drift, static_cast<double>(e.peakStored()));
+            CHECK(drift < 1.0 && drift > -12.0);       // it holds (the low cuts take a little a pass), it does not swell
+            CHECK(e.peakStored() < 0.95f);             // and no limiter had to catch it
+        }
+}
+
+// R45: a ping-pong line in a Ring runs as Stereo inside and passes its feed on with the sides swapped: the ping-pong goes round the ring.
+void echoRingPingPong() {
+    for (int which = 0; which < 2; ++which) {   // A alone, then all four
+        Rig e;
+        P p;
+        p.routing = Echo::kRing;
+        for (int i = 0; i < 4; ++i) {
+            Echo::Line& l = onFree(p, i, 100.0f, 1.0f);
+            if (which == 1 || i == 0) l.p.mode = gf::EchoLine::kPingPong;
+        }
+        const int n = 11 * kSr;
+        Buf hit = silence(n);
+        {
+            const Buf b = sine(1000.0, 882, 0.5f);
+            for (size_t i = 0; i < b.size(); ++i) hit[100 + i] = b[i] * static_cast<float>(0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) / 882.0));
+        }
+        const Wet w = run(e, p, hit);
+        auto pass = [&](int k, double& l, double& r) {
+            const size_t at = 100 + 4410 * static_cast<size_t>(k);
+            l = rms(w.l, at, at + 882);
+            r = rms(w.r, at, at + 882);
+        };
+        double l1, r1;
+        pass(1, l1, r1);
+        const double first = l1 * l1 + r1 * r1;
+        CHECK(first > 0.01);
+        for (int k = 1; k <= 100; ++k) {
+            double l, r;
+            pass(k, l, r);
+            // the side: A is on the left in the first trip (the send comes in mono in L), then B, C and D on the right; with one
+            // ping-pong line the sides alternate trip by trip, with four pass by pass
+            const bool left = which == 0 ? ((k - 1) / 4 % 2 == 0) == ((k - 1) % 4 == 0) : (k % 2 == 1);
+            const bool ok = left ? (l > 20.0 * r) : (r > 20.0 * l);
+            if (!ok && k <= 12) std::printf("  ping-pong ring (%s), pass %d: L %g R %g\n", which ? "four" : "A", k, l, r);
+            if (k <= 12 || k == 100) CHECK(ok);
+        }
+        double l100, r100;
+        pass(100, l100, r100);
+        const double last = l100 * l100 + r100 * r100;
+        if (!near(db(last / first), 0.0, 1.0)) std::printf("  ping-pong ring (%s): %g dB after 10 s\n", which ? "four" : "A", db(last / first));
+        CHECK(near(db(last / first), 0.0, 1.0));   // holds its level (within 1 dB over 10 s)
+    }
+}
+
+// R45, the send: a ping-pong line in a Ring takes it as its mono sum in L only, so a send out of phase in the two sides gives nothing.
+void echoRingPingPongSend() {
+    Rig e, f;
+    P p;
+    p.routing = Echo::kRing;
+    for (int i = 0; i < 4; ++i) {
+        Echo::Line& l = onFree(p, i, 100.0f, 1.0f);
+        if (i == 0) l.p.mode = gf::EchoLine::kPingPong;
+    }
+    Buf b = sine(1000.0, 882, 0.5f);
+    for (size_t i = 0; i < b.size(); ++i) b[i] *= static_cast<float>(0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) / 882.0));
+    Buf inL = silence(20000), inR = silence(20000);
+    std::copy(b.begin(), b.end(), inL.begin() + 100);
+    for (size_t i = 0; i < b.size(); ++i) inR[100 + i] = -b[i];
+    const Wet w = run(e, p, inL, inR);
+    CHECK(rms(w.l, 4510, 4510 + 882) < 1e-3 && rms(w.r, 4510, 4510 + 882) < 1e-3);   // (0.5 (L + R) = 0)
+    // and the same send into a stereo line goes in as it is
+    P q = p;
+    q.line[0].p.mode = gf::EchoLine::kStereo;
+    const Wet v = run(f, q, inL, inR);
+    CHECK(rms(v.l, 4510, 4510 + 882) > 0.1 && rms(v.r, 4510, 4510 + 882) > 0.1);
+}
+
+// R46: a line leaving the Ring (switched off) is out of it at once: what is passing goes on to the next line that is on.
+void echoRingLeaves() {
+    Rig e;
+    P p;
+    p.routing = Echo::kRing;
+    for (int i = 0; i < 3; ++i) {
+        Echo::Line& l = onFree(p, i, 100.0f, 1.0f);
+        l.pan = i == 2 ? 1.0f : -1.0f;   // the right side is C alone
+    }
+    Buf b = sine(1000.0, 882, 0.5f);
+    for (size_t i = 0; i < b.size(); ++i) b[i] *= static_cast<float>(0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) / 882.0));
+    Buf in = silence(30000);
+    std::copy(b.begin(), b.end(), in.begin() + 100);
+    Wet w;
+    go(e, p, in, in, in, in, w, 0, 4608, tempo());   // A reads the burst at 4510 and passes it to B
+    p.line[1].on = false;
+    go(e, p, in, in, in, in, w, 4608, in.size(), tempo());
+    // The rest of the burst (from 4608) goes A -> C now and C plays it 100 ms on, at 9018: it is there at once, not 10 ms later,
+    // when B would have finished fading out.
+    const double rest = rms(w.r, 9018, 9018 + 300);
+    if (!(rest > 0.05)) std::printf("  a line leaving the ring: %g\n", rest);
+    CHECK(rest > 0.05);
+}
+
+// R47: the shared follower starts from nothing when it resumes after chunks nobody used it (a stale one holds the key of a while ago).
+void echoFollowResumes() {
+    const int n = 3 * kSr;
+    const Buf tone = sine(1000.0, n, 0.3f);
+    Buf key = sine(500.0, n, 0.5f);
+    std::fill(key.begin() + kSr, key.end(), 0.0f);   // the key falls silent at 1 s
+    P p;
+    Echo::Line& l = onFree(p, 0, 5.0f);
+    l.mod.mode = gf::EchoMod::kFollow;
+    l.modLevel = 1.0f;
+    P off = p;
+    off.line[0].mod.mode = gf::EchoMod::kOff;
+    Rig e;
+    Wet w;
+    go(e, p, tone, tone, key, key, w, 0, kSr, tempo());                 // Follow on a loud key
+    go(e, off, tone, tone, key, key, w, kSr, 2 * kSr, tempo());         // Off: nobody follows, the key is silent now
+    go(e, p, tone, tone, key, key, w, 2 * kSr, n, tempo());             // Follow again on the silent key: the level is 0, the line closed
+    CHECK(rms(w.l, kSr / 2, kSr) > 0.05);                              // (it did follow the loud key)
+    if (!(rms(w.l, 2 * kSr, 2 * kSr + 2205) < 1e-3)) std::printf("  follow resumes: heard %g in the first 50 ms\n", rms(w.l, 2 * kSr, 2 * kSr + 2205));
+    CHECK(rms(w.l, 2 * kSr, 2 * kSr + 2205) < 1e-3);
 }
 
 // R41: one detector and one follower for the lines are what one each would find.
@@ -899,7 +1090,7 @@ void echoFreeze() {      // frozen: the lines hold, the send is closed; both gli
         CHECK(near(w.l[G + 441 + 4410] / 0.5, kH0 * 0.5, 0.03));
         CHECK(std::fabs(w.l[G + 946 + 4410]) < 1e-3f);
     }
-    // Unfreezing opens the send again and lets the lines decay.
+    // Unfreezing opens the send again ...
     {
         Rig e;
         const Buf x = make(true);
@@ -910,6 +1101,18 @@ void echoFreeze() {      // frozen: the lines hold, the send is closed; both gli
         go(e, q, x, x, x, x, w, static_cast<size_t>(4 * T) - static_cast<size_t>(4 * T) % kChunk, x.size(), tempo());
         const double late = magnitude(w.l, 1000.0, static_cast<size_t>(5 * T) + T - 20, static_cast<size_t>(5 * T) + T + 902);
         CHECK(late > 0.01);   // the burst at 5T, now let in, is heard one repeat later
+    }
+    // ... and lets what the lines hold decay again at their feedback: held to 4T, then half a repeat each time.
+    {
+        Rig e;
+        const Buf x = make(false);
+        Wet w;
+        go(e, p, x, x, x, x, w, 0, F, tempo());
+        go(e, fr, x, x, x, x, w, F, static_cast<size_t>(4 * T), tempo());
+        go(e, p, x, x, x, x, w, static_cast<size_t>(4 * T), x.size(), tempo());
+        const double held = rep(w, 4);
+        CHECK(near(db(rep(w, 3) / held), 0.0, 0.3));               // frozen: repeats 3 and 4 the same
+        CHECK(near(db(rep(w, 5) / held), -6.0, 0.6) && near(db(rep(w, 6) / rep(w, 5)), -6.0, 0.6) && near(db(rep(w, 7) / rep(w, 6)), -6.0, 0.6));
     }
 }
 
@@ -1343,7 +1546,11 @@ void echoTail() {        // how long it rings: the lines' tails along the routin
     p.routing = Echo::kSerial;
     CHECK(tail(p) >= 2 * one - 100);   // in a row: the sum
     p.routing = Echo::kRing;
-    CHECK(tail(p) < (1 << 29));        // a ring of two lines, D and C off: a chain
+    const int two = tail(p);
+    CHECK(two < (1 << 29) && two >= 2 * 13230);   // a ring of the two lines that are on, 0.25 a trip: it dies
+    p.line[0].p.feedback = p.line[1].p.feedback = 1.0f;
+    CHECK(tail(p) >= (1 << 29));       // at 1 on both of them it never does (R46)
+    p.line[0].p.feedback = p.line[1].p.feedback = 0.5f;
     for (int i = 2; i < 4; ++i) on(p, i, k8, 0.5f);
     const int round = tail(p);
     CHECK(round < (1 << 29) && round >= 3 * 4 * 13230);   // all four round at 0.5 each: it dies, in 3 trips to -60 dB
@@ -1401,10 +1608,10 @@ P clickBase() {          // A and B on, C and D set but off
     return p;
 }
 // All four on, with times whose sum is no whole number of 400 Hz cycles, so a ring of them settles instead of building.
-P ringBase() {
+P ringBase(float fb = 0.5f) {
     P p;
-    const float ms[4] = {70.0f, 90.3f, 61.7f, 83.3f};
-    for (int i = 0; i < 4; ++i) onFree(p, i, ms[i], 0.5f).pan = 0.25f * static_cast<float>(i) - 0.4f;
+    const float ms[4] = {69.2f, 89.2f, 64.9f, 82.5f};   // (no sum of some of them is near a whole number of 400 Hz cycles)
+    for (int i = 0; i < 4; ++i) onFree(p, i, ms[i], fb).pan = 0.25f * static_cast<float>(i) - 0.4f;
     p.routing = Echo::kRing;
     return p;
 }
@@ -1452,6 +1659,11 @@ void click(const char* name, P before, void (*change)(P&), double limit = 1.25, 
     CHECK(allFinite(w.l) && allFinite(w.r));
 }
 
+// A crossfade of 1 ms between two signals that are not the same (a Ring's lines come to carry what others carried, at other delays,
+// so the phases of the old and the new have nothing to do with each other) adds up to |old - new| / 45 to the slope of a sample:
+// up to 1.4 times a sine's at equal amplitudes, 1.8 at most. A jump would be 10 times that. The same-phase cases hold 1.25.
+constexpr double kUnrelated = 1.6;
+
 void echoNoClicks() {    // a routing, a mode, the freeze, a time, every switch and every control: a step no steeper than the tone's own
     // Every routing to every other, with all four lines on.
     {
@@ -1467,12 +1679,13 @@ void echoNoClicks() {    // a routing, a mode, the freeze, a time, every switch 
                 static int target;
                 target = to;
                 const std::string name = "routing " + std::to_string(from) + " -> " + std::to_string(to);
+                const double limit = from == Echo::kRing || to == Echo::kRing ? kUnrelated : 1.25;
                 if (to == Echo::kRing) {   // into the ring: the lines are ring-safe ones
                     P r = ringBase();
                     r.routing = from;
-                    click(name.c_str(), r, [](P& p) { p.routing = Echo::kRing; });
+                    click(name.c_str(), r, [](P& p) { p.routing = Echo::kRing; }, limit);
                 } else {
-                    click(name.c_str(), a, [](P& p) { p.routing = target; });
+                    click(name.c_str(), a, [](P& p) { p.routing = target; }, limit);
                 }
             }
     }
@@ -1504,6 +1717,17 @@ void echoNoClicks() {    // a routing, a mode, the freeze, a time, every switch 
     click("line C on", clickBase(), [](P& p) { p.line[2].on = true; });
     click("line D on, spread", [] { P p = clickBase(); p.routing = Echo::kSpread; return p; }(), [](P& p) { p.line[3].on = true; });
     click("line D on, ring", [] { P p = ringBase(); p.line[3].on = false; return p; }(), [](P& p) { p.line[3].on = true; });
+    click("ring at 1: D off", ringBase(1.0f), [](P& p) { p.line[3].on = false; }, kUnrelated);   // the ring closes over the lines that are on (R46)
+    click("ring at 1: B off (a middle line)", ringBase(1.0f), [](P& p) { p.line[1].on = false; }, kUnrelated);
+    click("ring at 1: A off (the one with the send)", ringBase(1.0f), [](P& p) { p.line[0].on = false; }, kUnrelated);
+    click("ring at 1: B on", [] { P p = ringBase(1.0f); p.line[1].on = false; return p; }(), [](P& p) { p.line[1].on = true; }, kUnrelated);
+    click("ring: A stereo -> ping-pong", ringBase(), [](P& p) { p.line[0].p.mode = gf::EchoLine::kPingPong; }, kUnrelated);
+    click("ring (A ping-pong) -> serial", [] { P p = ringBase(); p.line[0].p.mode = gf::EchoLine::kPingPong; return p; }(),
+          [](P& p) { p.routing = Echo::kSerial; }, kUnrelated);
+    click("serial -> ring (A ping-pong)", [] { P p = ringBase(); p.routing = Echo::kSerial; p.line[0].p.mode = gf::EchoLine::kPingPong; return p; }(),
+          [](P& p) { p.routing = Echo::kRing; }, kUnrelated);
+    click("frozen: serial -> parallel", [] { P p = clickBase(); p.routing = Echo::kSerial; p.freeze = true; return p; }(), [](P& p) { p.routing = Echo::kParallel; },
+          1.25, true, [](P& p) { p.freeze = false; });
     click("all lines off", clickBase(), [](P& p) { for (Echo::Line& l : p.line) l.on = false; });
     // The Echo's controls.
     click("send 1 -> 0", clickBase(), [](P& p) { p.send = 0.0f; });
@@ -1543,6 +1767,10 @@ void echoTests() {
     echoRing();
     echoLoopScale();
     echoRingFeedback();
+    echoRingPingPong();
+    echoRingPingPongSend();
+    echoRingLeaves();
+    echoFreezeRoutings();
     echoRoutingChange();
     echoOff();
     echoFades();
@@ -1558,6 +1786,7 @@ void echoTests() {
     echoModEnv();
     echoSharedKey();
     echoModShared();
+    echoFollowResumes();
     echoModLevel();
     echoModTime();
     echoModSlewed();

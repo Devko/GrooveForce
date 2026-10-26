@@ -38,9 +38,33 @@ constexpr Wire kWire[Echo::kRoutings][Echo::kLines] = {
     /* Parallel */ {{true, -1}, {true, -1}, {true, -1}, {true, -1}},
     /* Serial   */ {{true, -1}, {false, 0}, {false, 1}, {false, 2}},
     /* Pairs    */ {{true, -1}, {false, 0}, {true, -1}, {false, 2}},
-    /* Ring     */ {{true, 3}, {false, 0}, {false, 1}, {false, 2}},
+    /* Ring     */ {{true, 3}, {false, 0}, {false, 1}, {false, 2}},   // (when all four are on; wiring() closes it over the lines that are on)
     /* Spread   */ {{true, -1}, {false, 0}, {false, 0}, {false, 0}},
 };
+
+// The routing as it is wired for the lines that are on (R46): the table's, except that a Ring closes over the lines that are on,
+// each taking the previous one's feed, the first of them the send as well, and a lone one feeding itself. A line that is not on
+// (off, or fading out) is in no Ring. src[i] is -1 where line i takes no feed.
+void wiring(int routing, const bool* on, bool* x, int* src) {
+    for (int i = 0; i < Echo::kLines; ++i) {
+        x[i] = kWire[routing][i].x;
+        src[i] = kWire[routing][i].src;
+    }
+    if (routing != Echo::kRing) return;
+    int first = -1, prev = -1;
+    for (int i = 0; i < Echo::kLines; ++i) {
+        x[i] = false;
+        src[i] = -1;
+        if (!on[i]) continue;
+        if (first < 0) {
+            first = i;
+            x[i] = true;
+        }
+        src[i] = prev;
+        prev = i;
+    }
+    if (first >= 0) src[first] = prev;   // the last of them: the first itself, if it is alone
+}
 
 float cleanInput(float v) { return std::isfinite(v) ? std::clamp(v, -kInputClamp, kInputClamp) : 0.0f; }
 
@@ -84,8 +108,10 @@ void Echo::reset() {
         if (st_) st_->line[i].reset();
     }
     for (ef::Ramp& g : feedG_) g = ef::Ramp();
+    for (ef::Ramp& g : swap_) g = ef::Ramp();
     det_.reset();
     fol_.reset();
+    detLive_ = folLive_ = false;
     sens_ = -1.0f;
     freeze_ = 0.0f;
     duckEnv_ = 0.0f;
@@ -137,15 +163,17 @@ void Echo::set(const Params& in, const ef::Transport& t) {
         active_ = active_ || slot_[i].runs;
     }
 
-    // The routing's coefficients: they jump when nothing hears them, else they cross to the new ones in process().
-    const Wire* w = kWire[p_.routing];
+    // The wiring, for the lines that are on; the coefficients jump to it when nothing hears them, else they cross to it in process().
+    bool on[kLines];
+    for (int i = 0; i < kLines; ++i) on[i] = slot_[i].runs && slot_[i].goal > 0.0f;
+    wiring(p_.routing, on, wireX_, wireSrc_);
     bool there = true;
     for (int i = 0; i < kLines; ++i) {
-        const float tx = w[i].x ? 1.0f : 0.0f;
+        const float tx = wireX_[i] ? 1.0f : 0.0f;
         if (fresh_ || !active_) wx_[i] = tx;
         there = there && wx_[i] == tx;
         for (int k = 0; k < kLines; ++k) {
-            const float ty = w[i].src == k ? 1.0f : 0.0f;
+            const float ty = wireSrc_[i] == k ? 1.0f : 0.0f;
             if (fresh_ || !active_) wy_[i][k] = ty;
             there = there && wy_[i][k] == ty;
         }
@@ -172,6 +200,7 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
         std::fill(wetL, wetL + n, 0.0f);
         std::fill(wetR, wetR + n, 0.0f);
         awake_ = false;
+        detLive_ = folLive_ = false;
         return;
     }
     if (!awake_) wake();
@@ -206,7 +235,8 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
     duckGain_.to(toward(duckGain_.value(), duckT, slope), n);
 
     // The key's detector and follower (R41): one for the whole Echo, run in the chunks where a line that runs needs
-    // them, and every line's modulator is given what they found.
+    // them, and every line's modulator is given what they found. After a chunk they skipped they start from nothing (R47):
+    // what they held is the key of a while ago.
     bool needEnv = false, needFollow = false;
     for (int i = 0; i < kLines; ++i)
         if (slot_[i].runs) {
@@ -216,30 +246,37 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
     int onset = -1;
     float followed = 0.0f;
     if (needEnv) {
+        if (!detLive_) det_.reset();
         if (p_.sensitivity != sens_) {
             sens_ = p_.sensitivity;
             det_.setSensitivity(sens_);
         }
         onset = det_.process(kL, kR, n);
     }
-    if (needFollow) followed = fol_.process(kL, kR, n);
+    if (needFollow) {
+        if (!folLive_) fol_.reset();
+        followed = fol_.process(kL, kR, n);
+    }
+    detLive_ = needEnv;
+    folLive_ = needFollow;
 
     // Phase 1, every line that runs: its modulator, its parameters, and its read (faded).
-    const Wire* wire = kWire[p_.routing];
     const bool ring = p_.routing == kRing;   // R39: there a line's feedback is its send round the ring, and it has none of its own
     float feedT[kLines];   // the gain each line's read is passed on at, where it is going
     bool fresh[kLines];
+    int swapMode[kLines];  // R45: 0 the feed is passed on as it is, 1 with its sides swapped, 2 in between (the swap is moving)
     bool needX = xfade_;
     bool isSrc[kLines];
     for (int k = 0; k < kLines; ++k) isSrc[k] = xfade_;
     for (int i = 0; i < kLines; ++i) {
         feedT[i] = 1.0f;
         fresh[i] = false;
+        swapMode[i] = 0;
         Slot& s = slot_[i];
         if (!s.runs) continue;
         ++running_;
-        needX = needX || wire[i].x;
-        if (wire[i].src >= 0) isSrc[wire[i].src] = true;
+        needX = needX || wireX_[i];
+        if (wireSrc_[i] >= 0) isSrc[wireSrc_[i]] = true;
         const Line& l = p_.line[i];
         EchoLine& line = st_->line[i];
         fresh[i] = !s.live;   // coming on from rest: the fade covers it, the values start where they are going
@@ -251,8 +288,12 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
         const float m = mod_[i].nextShared(mp, t_, n, onset, followed);
         s.mod = fresh[i] ? m : toward(s.mod, m, slope);
 
+        // R45: in a Ring a ping-pong line runs as Stereo inside (the cross-over of its repeats lives in the own feedback a Ring
+        // does not have) and passes its feed on with the sides swapped, so the ping-pong goes round the ring without a loss.
+        const bool pingPong = ring && l.p.mode == EchoLine::kPingPong;
         EchoLine::Params lp = l.p;
         lp.glide = p_.glide;
+        if (pingPong) lp.mode = EchoLine::kStereo;
         const float base = std::clamp(ef::clampParam(l.p.feedback, 0.0f, 1.0f, 0.0f) + p_.feedbackOffset, 0.0f, 1.0f);
         const float fb = base + (1.0f - base) * freeze_;
         lp.feedback = ring ? 0.0f : fb;
@@ -274,8 +315,16 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
             }
             s.fade = f;
         }
-        const float sc = line.loopScale();   // R36
-        feedT[i] = (ring ? fb : 1.0f) * (sc >= 0.0f && sc <= 1.0f ? sc : 1.0f);
+        // What is passed on to the other lines: in a Ring the feedback, frozen the feeds stop (R44: the lines hold what they
+        // have, and a feed that went on would swell the lines downstream into their limiters), times the loopScale (R36).
+        const float sc = line.loopScale();
+        feedT[i] = (ring ? fb : 1.0f - freeze_) * (sc >= 0.0f && sc <= 1.0f ? sc : 1.0f);
+        ef::Ramp& sw = swap_[i];
+        if (fresh[i]) sw.jump(pingPong ? 1.0f : 0.0f);
+        else sw.to(toward(sw.value(), pingPong ? 1.0f : 0.0f, kFadeStep * count), n);
+        swapMode[i] = sw.moving() || (sw.value() > 0.0f && sw.value() < 1.0f) ? 2 : (sw.value() >= 1.0f ? 1 : 0);
+        if (swapMode[i] == 2)
+            for (int k = 0; k < n; ++k) swapBuf_[i][k] = sw.next();
 
         // The heard gains: level, the modulator's dip, the pan.
         if (l.pan != s.pan) {
@@ -319,13 +368,30 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
         }
         // What the routing passes on: the read at its feed gain (1 in the feed-forward routings, the feedback in a
         // Ring, times the line's loopScale), the gain moved in a straight line across the chunk and no faster than a
-        // full scale in 1 ms.
+        // full scale in 1 ms; with its sides swapped, as far as the line's ping-pong goes round a Ring.
         ef::Ramp& fg = feedG_[i];
         if (fresh[i] || !isSrc[i]) fg.jump(feedT[i]);
         else fg.to(toward(fg.value(), feedT[i], slope), n);
         feedL[i] = yl;
         feedR[i] = yr;
-        if (isSrc[i] && (fg.moving() || fg.value() != 1.0f)) {
+        if (isSrc[i] && swapMode[i] == 1) {   // swapped all the way: the sides trade places
+            for (int k = 0; k < n; ++k) {
+                const float g = fg.next();
+                sL_[i][k] = g * yr[k];
+                sR_[i][k] = g * yl[k];
+            }
+            feedL[i] = sL_[i];
+            feedR[i] = sR_[i];
+        } else if (isSrc[i] && swapMode[i] == 2) {
+            for (int k = 0; k < n; ++k) {
+                const float g = fg.next(), sv = swapBuf_[i][k];
+                const float l = yl[k], r = yr[k];
+                sL_[i][k] = g * (l + sv * (r - l));
+                sR_[i][k] = g * (r + sv * (l - r));
+            }
+            feedL[i] = sL_[i];
+            feedR[i] = sR_[i];
+        } else if (isSrc[i] && (fg.moving() || fg.value() != 1.0f)) {
             if (fg.moving()) {
                 for (int k = 0; k < n; ++k) {
                     const float g = fg.next();
@@ -359,6 +425,29 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
             }
         }
     }
+    // R45: a ping-pong line in a Ring takes the send as its mono sum in L only (the line's own rule, which is for the send alone there).
+    const float* xl[kLines];
+    const float* xr[kLines];
+    for (int i = 0; i < kLines; ++i) {
+        xl[i] = xL_;
+        xr[i] = xR_;
+        if (needX && slot_[i].runs && swapMode[i] && (wireX_[i] || xfade_)) {
+            if (swapMode[i] == 1) {
+                for (int k = 0; k < n; ++k) {
+                    xpL_[i][k] = 0.5f * (xL_[k] + xR_[k]);
+                    xpR_[i][k] = 0.0f;
+                }
+            } else {
+                for (int k = 0; k < n; ++k) {
+                    const float mono = 0.5f * (xL_[k] + xR_[k]), sv = swapBuf_[i][k];
+                    xpL_[i][k] = xL_[k] + sv * (mono - xL_[k]);
+                    xpR_[i][k] = xR_[k] * (1.0f - sv);
+                }
+            }
+            xl[i] = xpL_[i];
+            xr[i] = xpR_[i];
+        }
+    }
 
     // Phase 2: each line's input, made from the send and the others' reads by the routing, and written.
     for (int i = 0; i < kLines; ++i) {
@@ -368,12 +457,13 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
         float *bL = inL_[i], *bR = inR_[i];
         if (xfade_) {
             // The routing is changing: the input is the sum of the send and the four reads along their coefficients.
+            const float tx = wireX_[i] ? 1.0f : 0.0f;
             for (int k = 0; k < n; ++k) {
                 const float step = kSlope * static_cast<float>(k + 1);
-                const float cx = toward(wx_[i], wire[i].x ? 1.0f : 0.0f, step);
-                float l = cx * xL_[k], r = cx * xR_[k];
+                const float cx = toward(wx_[i], tx, step);
+                float l = cx * xl[i][k], r = cx * xr[i][k];
                 for (int j = 0; j < kLines; ++j) {
-                    const float cy = toward(wy_[i][j], wire[i].src == j ? 1.0f : 0.0f, step);
+                    const float cy = toward(wy_[i][j], wireSrc_[i] == j ? 1.0f : 0.0f, step);
                     l += cy * feedL[j][k];
                     r += cy * feedR[j][k];
                 }
@@ -383,17 +473,17 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
             aL = bL;
             aR = bR;
         } else {
-            const int src = wire[i].src >= 0 && slot_[wire[i].src].runs ? wire[i].src : -1;
-            if (wire[i].x && src < 0) {
-                aL = xL_;
-                aR = xR_;
-            } else if (!wire[i].x && src >= 0) {
+            const int src = wireSrc_[i] >= 0 && slot_[wireSrc_[i]].runs ? wireSrc_[i] : -1;
+            if (wireX_[i] && src < 0) {
+                aL = xl[i];
+                aR = xr[i];
+            } else if (!wireX_[i] && src >= 0) {
                 aL = feedL[src];
                 aR = feedR[src];
-            } else if (wire[i].x) {
+            } else if (wireX_[i]) {
                 for (int k = 0; k < n; ++k) {
-                    bL[k] = xL_[k] + feedL[src][k];
-                    bR[k] = xR_[k] + feedR[src][k];
+                    bL[k] = xl[i][k] + feedL[src][k];
+                    bR[k] = xr[i][k] + feedR[src][k];
                 }
                 aL = bL;
                 aR = bR;
@@ -412,11 +502,13 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
     if (xfade_) {   // the coefficients have moved on, running or not
         bool there = true;
         for (int i = 0; i < kLines; ++i) {
-            wx_[i] = toward(wx_[i], wire[i].x ? 1.0f : 0.0f, slope);
-            there = there && wx_[i] == (wire[i].x ? 1.0f : 0.0f);
+            const float tx = wireX_[i] ? 1.0f : 0.0f;
+            wx_[i] = toward(wx_[i], tx, slope);
+            there = there && wx_[i] == tx;
             for (int j = 0; j < kLines; ++j) {
-                wy_[i][j] = toward(wy_[i][j], wire[i].src == j ? 1.0f : 0.0f, slope);
-                there = there && wy_[i][j] == (wire[i].src == j ? 1.0f : 0.0f);
+                const float ty = wireSrc_[i] == j ? 1.0f : 0.0f;
+                wy_[i][j] = toward(wy_[i][j], ty, slope);
+                there = there && wy_[i][j] == ty;
             }
         }
         xfade_ = !there;
@@ -451,20 +543,29 @@ int Echo::tailSamples() const {
     if (p_.freeze) return static_cast<int>(kForever);   // it holds
     int64_t own[kLines], reach[kLines];
     for (int i = 0; i < kLines; ++i) own[i] = reach[i] = slot_[i].runs ? st_->line[i].tailSamples() : 0;
-    if (p_.routing == kRing && count == kLines) {
-        // R39: the lines have no feedback of their own; it goes round, a trip at a time, at the product of the four feedbacks.
+    if (p_.routing == kRing) {
+        // R39, R46: the lines have no feedback of their own; it goes round the lines that are on, a trip at a time, at the
+        // product of their feedbacks. Lines fading out ring out on their own.
         double product = 1.0;
-        int64_t trip = 0;
+        int64_t trip = 0, fading = 0;
+        int ons = 0;
         for (int i = 0; i < kLines; ++i) {
-            product *= std::clamp(ef::clampParam(p_.line[i].p.feedback, 0.0f, 1.0f, 0.0f) + p_.feedbackOffset, 0.0f, 1.0f);
-            trip += own[i];
+            if (!slot_[i].runs) continue;
+            if (slot_[i].goal > 0.0f) {
+                product *= std::clamp(ef::clampParam(p_.line[i].p.feedback, 0.0f, 1.0f, 0.0f) + p_.feedbackOffset, 0.0f, 1.0f);
+                trip += own[i];
+                ++ons;
+            } else {
+                fading = std::max(fading, own[i]);
+            }
         }
+        if (ons == 0) return static_cast<int>(fading);
         if (!(product < 0.999999)) return static_cast<int>(kForever);   // it holds for ever
         const double trips = product > 1e-9 ? std::floor(std::log(1e-3) / std::log(product)) + 1.0 : 1.0;   // down to -60 dB
-        return static_cast<int>(std::min(trips * static_cast<double>(trip), static_cast<double>(kForever)));
+        return static_cast<int>(std::min(std::max(trips * static_cast<double>(trip), static_cast<double>(fading)), static_cast<double>(kForever)));
     }
     const Wire* wire = kWire[p_.routing];
-    for (int pass = 0; pass < kLines; ++pass)   // (a ring with one line off is a chain: no cycle)
+    for (int pass = 0; pass < kLines; ++pass)   // (the other routings have no cycle)
         for (int i = 0; i < kLines; ++i)
             if (slot_[i].runs) {
                 const int src = wire[i].src;
