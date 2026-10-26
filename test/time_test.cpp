@@ -191,10 +191,22 @@ void timeEvaluator() { // the evaluator's laws on patterns whose curves are know
     CHECK(gf::timeNextJump(half, 0.0, 3.99) > 1e300 && near(gf::timeNextJump(half, 0.0, 4.0), 4.0, 1e-12));
     CHECK(near(gf::timeNextJump(rev, 0.0, 1.0), 1.0, 1e-12) && gf::timeNextJump(rev, 1.0, 5.0) > 1e300);
     CHECK(near(gf::timeNextJump(roll, 1.5, 4.0), 2.0, 1e-12) && near(gf::timeNextJump(roll, 2.0, 4.0), 2.5, 1e-12));
-    // a Smooth segment is a raised cosine: flat at both ends, the middle halfway, its speed a sine
-    CHECK(near(gf::timeSourceAt(spin, 0.25), -0.5, 1e-9) && near(gf::timeSourceAt(spin, 0.5), -1.0, 1e-9));
-    CHECK(near(gf::timeSpeedAt(spin, 0.0), 0.0, 1e-9) && near(gf::timeSpeedAt(spin, 0.25), -kPi, 1e-6));
-    CHECK(near(gf::timeSourceAt(spin, 0.1), -0.5 * (1.0 - std::cos(kPi * 0.2)), 1e-9));
+    // a Smooth segment is a raised cosine: flat at both ends, the middle halfway, its speed a sine (no library pattern has one
+    // now: a curve of its own, bound as the evaluator binds the library's)
+    {
+        const gf::TPoint pts[] = {{0.0f, 0.0f, gf::TSeg::Smooth}, {0.5f, -1.0f, gf::TSeg::Line}};
+        gf::TimeCurve c;
+        c.bind(pts, 2);
+        c.seek(0.25);
+        CHECK(near(c.value(0.25), -0.5, 1e-9) && near(c.value(0.5), -1.0, 1e-9));
+        CHECK(near(c.slope(0.0), 0.0, 1e-9) && near(c.slope(0.25), -kPi, 1e-6));
+        c.seek(0.1);
+        CHECK(near(c.value(0.1), -0.5 * (1.0 - std::cos(kPi * 0.2)), 1e-9));
+    }
+    // the spin-back is already going backwards at its first sample (speed -1: a speed that started at 0 would mute it, the level
+    // follows the speed), faster and faster to -3, a beat back at its end
+    CHECK(near(gf::timeSpeedAt(spin, 0.0), -1.0, 0.03) && near(gf::timeSpeedAt(spin, 0.49), -3.0, 0.1));   // 48 lines on the parabola
+    CHECK(near(gf::timeSourceAt(spin, 0.5), -1.0, 1e-9) && near(gf::timeSourceAt(spin, 0.25), -0.375, 1e-3));
     // the tape stop: the speed 1 - x / 4, the source x - x^2 / 8
     CHECK(near(gf::timeSourceAt(stop, 2.0), 1.5, 1e-9) && near(gf::timeSourceAt(stop, 4.0), 2.0, 1e-9));
     CHECK(near(gf::timeSpeedAt(stop, 2.0), 0.5, 0.01) && near(gf::timeSpeedAt(stop, 3.9), 0.025, 0.01));
@@ -502,15 +514,18 @@ void timeSpinRewind() {// Spin-Back and Rewind play backwards, then rejoin
         CHECK(ok);
         for (size_t i = S + B + 2; i < S + 2 * B; i += 19) CHECK(near(out[i], 1.0, 1e-6));
     }
-    {   // Spin-Back: backwards with a raised cosine's speed, fading out; silent at the end
+    {   // Spin-Back: backwards from the first sample and faster, fading out; silent at the end
         const int p = idx("Spin-Back");
         const size_t S = at(3.0), H = at(0.5);
         const Buf in = sine(300.0, static_cast<int>(S + 3 * H), 0.5f);
         const Buf out = render(in, p, 3.0);
+        const Buf flat(S + 3 * H, 0.5f);                              // it sounds at once: no hole at the start (the level
+        const Buf held = render(flat, p, 3.0);                        // follows the speed: from 0 it would have taken ~8 ms)
+        CHECK(held[S] > 0.49f && held[S + 20] > 0.49f && held[S + 200] > 0.49f);
         CHECK(peak(out, S + at(0.05), S + at(0.15)) > 0.2f);          // it sounds
         CHECK(peak(out, S + H - 300, S + H - 60) < 0.02f);            // and fades out
         CHECK(maxStep(out, 2, out.size()) <= clickBound(300.0, topSpeed(p)));
-        // the playhead went back: the tone in the middle is higher than 300 Hz (speed up to pi)
+        // the playhead went back: the tone in the middle is higher than 300 Hz (speed 1.6 to 2.4 there)
         CHECK(crossingHz(out, S + at(0.15), S + at(0.35)) > 450.0);
     }
 }
