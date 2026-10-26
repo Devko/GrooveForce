@@ -30,7 +30,7 @@ ef::Transport transport(double bpm, double beats, bool playing, bool valid = tru
     return t;
 }
 ef::Transport playingAt(double bpm, double beats) { return transport(bpm, beats, true); }
-ef::Transport stopped(double bpm) { return transport(bpm, 7.3, false); }   // MPC says where it stopped; the Pump runs on from 0
+ef::Transport stopped(double bpm) { return transport(bpm, 8.0, false); }   // MPC says where it stopped (on a beat); the Pump starts there and runs on
 
 float val(const Buf& x, int i) { return x[static_cast<size_t>(i)]; }
 
@@ -59,6 +59,17 @@ void renderWith(const P& p, Buf& L, Buf& R, F transportAt, int chunk = ef::kChun
 void render(const P& p, Buf& L, Buf& R, ef::Transport t, int chunk = ef::kChunk) {
     Pump m;
     run(m, p, L, R, t, chunk);
+}
+// The same with a key: the Pump listens to kL / kR (as long as L / R) instead of its own input. The
+// transport advances while playing, as run() does it.
+void renderKeyed(const P& p, Buf& L, Buf& R, const Buf& kL, const Buf& kR, ef::Transport t, int chunk = ef::kChunk) {
+    Pump m;
+    for (size_t pos = 0; pos < L.size(); pos += static_cast<size_t>(chunk)) {
+        const int n = static_cast<int>(std::min(static_cast<size_t>(chunk), L.size() - pos));
+        m.set(p, t);
+        m.process(&L[pos], &R[pos], n, &kL[pos], &kR[pos]);
+        if (t.playing) t.beats += n / static_cast<double>(ef::kRate) * t.bpm / 60.0;
+    }
 }
 // DC 0.5 through the Pump, as the gain (0.5 scales exactly: the gain has every bit of the output).
 Buf dcOut(const P& p, int n, ef::Transport t, int chunk = ef::kChunk) {
@@ -406,6 +417,91 @@ void pumpHats() {   // Input trigger on a drum bus: kicks on the beat, hats 6 dB
     CHECK(static_cast<int>(dives(gainFrom(in2, L2)).size()) == beats);
 }
 
+// Input trigger with a key: the audio is a steady pad, the key a kick track with hats over it. The pad
+// ducks on the key's kicks, a bottom a few ms after each starts, and not on its hats; without a key
+// (null, the old call) the Pump listens to the pad and finds nothing; the Grid trigger ignores the key.
+void pumpKey() {
+    const int lead = 8820, beats = 8, total = lead + beats * kBeat;
+    Buf key(static_cast<size_t>(total), 0.0f);
+    for (int k = 0; k < beats; ++k) {
+        addKick(key, lead + k * kBeat, 0.8f);
+        addHat(key, lead + k * kBeat + kBeat / 2, 0.4f, 10 + static_cast<uint32_t>(k));
+    }
+    const Buf pad = sine(220.0, total, 0.5f);
+    P p = hardPump();
+    p.trigger = Pump::kInput;
+    p.length = 0.3f;
+
+    Buf L = pad, R = pad;
+    renderKeyed(p, L, R, key, key, stopped(120.0));
+    const Buf g = gainFrom(pad, L);
+    const std::vector<int> found = dives(g);
+    CHECK(static_cast<int>(found.size()) == beats);   // a duck per kick: none on a hat, none missed
+    for (int k = 0; k < beats && k < static_cast<int>(found.size()); ++k) {
+        CHECK(found[static_cast<size_t>(k)] >= lead + k * kBeat && found[static_cast<size_t>(k)] <= lead + k * kBeat + 4 * kMs);
+        const int hat = lead + k * kBeat + kBeat / 2;
+        CHECK(minOver(g, hat, hat + 20 * kMs) > 0.99f);   // the hat in the key leaves the pad alone
+    }
+    CHECK(holds(g, 0, lead, 1.0f));   // nothing before the first kick: the pad's own start is not a hit
+    CHECK(biggestStep(g) <= kMaxStep + kTol);
+    CHECK(minOver(g, lead, lead + 8 * kMs) < 0.01f);   // down at the bottom, and back
+    CHECK(holds(g, lead + 160 * kMs, lead + kBeat / 2 - 2 * kMs, 1.0f));
+
+    // The key on one side only: the louder of the two is heard.
+    const Buf silence(key.size(), 0.0f);
+    Buf Lr = pad, Rr = pad;
+    renderKeyed(p, Lr, Rr, silence, key, stopped(120.0));
+    CHECK(maxDiff(Lr, L) <= 1e-6 && maxDiff(Rr, R) <= 1e-6);
+
+    // No key: the Pump hears the pad alone, which has no hits. The old call is the same as null keys.
+    Buf Ln = pad, Rn = pad, Lo = pad, Ro = pad;
+    {
+        Pump m;
+        for (size_t pos = 0; pos < Ln.size(); pos += ef::kChunk) {
+            const int n = static_cast<int>(std::min(static_cast<size_t>(ef::kChunk), Ln.size() - pos));
+            m.set(p, stopped(120.0));
+            m.process(&Ln[pos], &Rn[pos], n, nullptr, nullptr);
+        }
+    }
+    render(p, Lo, Ro, stopped(120.0));
+    CHECK(same(Ln, Lo) && same(Rn, Ro));
+    CHECK(dives(gainFrom(pad, Ln)).empty());
+    CHECK(maxDiff(Ln, pad) <= 1e-6);
+
+    // On kicks of its own the old call and a key that is the audio itself are the same.
+    Buf kicks(static_cast<size_t>(total), 0.0f);
+    for (int k = 0; k < beats; ++k) addKick(kicks, lead + k * kBeat, 0.8f);
+    Buf La = kicks, Ra = kicks, Lb = kicks, Rb = kicks;
+    render(p, La, Ra, stopped(120.0));
+    renderKeyed(p, Lb, Rb, kicks, kicks, stopped(120.0));
+    CHECK(same(La, Lb) && same(Ra, Rb));
+
+    // The Grid trigger doesn't listen: the key changes nothing.
+    const P grid = hardPump();
+    Buf Lg = pad, Rg = pad, Lh = pad, Rh = pad;
+    renderKeyed(grid, Lg, Rg, key, key, playingAt(120.0, 0.0));
+    render(grid, Lh, Rh, playingAt(120.0, 0.0));
+    CHECK(same(Lg, Lh) && same(Rg, Rh));
+
+    // Blocks of 1, 7 and 32 samples: the same ducks.
+    Buf a = pad, ar = pad, b = pad, br = pad, c = pad, cr = pad;
+    renderKeyed(p, a, ar, key, key, stopped(120.0), 32);
+    renderKeyed(p, b, br, key, key, stopped(120.0), 7);
+    renderKeyed(p, c, cr, key, key, stopped(120.0), 1);
+    CHECK(maxDiff(a, b) <= 1e-6 && maxDiff(a, c) <= 1e-6);
+
+    // A NaN or an infinity in the key never gets in: finite audio, the same as with them taken out.
+    Buf bad = key, clean = key;
+    bad[1000] = std::nanf("");
+    bad[2000] = INFINITY;
+    bad[3001] = -INFINITY;
+    clean[1000] = clean[2000] = clean[3001] = 0.0f;
+    Buf Lx = pad, Rx = pad, Ly = pad, Ry = pad;
+    renderKeyed(p, Lx, Rx, bad, bad, stopped(120.0));
+    renderKeyed(p, Ly, Ry, clean, clean, stopped(120.0));
+    CHECK(allFinite(Lx) && allFinite(Rx) && same(Lx, Ly) && same(Rx, Ry));
+}
+
 // A mix of two sines through the Pump parked at a long bottom (1 bar, Hold, length 1: 1.2 s down).
 void pumpBand() {
     const int n = 52000;
@@ -500,6 +596,53 @@ void pumpStopped() {   // MPC stopped: the ducks keep coming every 500 ms at 120
     // And then on the song position's beats: beat 4 is (4 - 3.3) beats after the start.
     const int beat4 = play + static_cast<int>(std::lround((4.0 - 3.3) * kBeat));
     CHECK(minOver(toGain(L), beat4 - kMs, beat4 + kMs) < 0.005f);
+}
+
+// Reset while MPC is stopped, and says where (beat 9.5): the grid starts from there, as it does when playing,
+// and then runs on at the tempo (plan 1's ruling R21; the grid used to start from beat 0, so its first bottom
+// came at the wrong time). Only the first set() after reset() seeds it.
+void pumpSeededStopped() {
+    const P p = hardPump();   // 1/4: a bottom on every beat, recovered half a beat on
+    const int first = kBeat / 2;   // beat 10
+    const Buf g = dcGain(p, 4 * kBeat, transport(120.0, 9.5, false));
+    CHECK(holds(g, 0, first - 2 * kMs, 1.0f));   // beat 9 is half a beat back and over: no bottom at the start
+    for (int k = 0; k < 4; ++k) {
+        CHECK(minOver(g, first + k * kBeat - kMs, first + k * kBeat + kMs) < 0.005f);
+        if (k < 3) CHECK(holds(g, first + k * kBeat + kBeat / 2, first + (k + 1) * kBeat - 2 * kMs, 1.0f));
+    }
+    CHECK(biggestStep(g) <= kMaxStep + kTol);
+
+    // At another tempo, from a position that isn't on a beat: beat 10 is 0.4 beat on at 90 BPM.
+    const int first90 = static_cast<int>(std::lround(0.4 * 60.0 / 90.0 * ef::kRate));
+    const Buf g90 = dcGain(p, 3 * kBeat, transport(90.0, 9.6, false));
+    CHECK(holds(g90, 0, first90 - 2 * kMs, 1.0f));
+    CHECK(minOver(g90, first90 - kMs, first90 + kMs) < 0.005f);
+
+    // MPC keeps saying 9.5 (or something else): it is a seed, not a position. The grid runs on at the tempo.
+    Buf L1(static_cast<size_t>(4 * kBeat), 0.5f), R1 = L1, L2 = L1, R2 = L1;
+    renderWith(p, L1, R1, [](size_t) { return transport(120.0, 9.5, false); });
+    renderWith(p, L2, R2, [&](size_t pos) { return transport(120.0, static_cast<int>(pos) < 2 * kBeat ? 9.5 : 31.7, false); });
+    CHECK(same(L1, L2));
+    CHECK(maxDiff(toGain(L1), g) <= 1e-6);
+
+    // MPC doesn't say where it is (not valid): from beat 0, as before.
+    const Buf g0 = dcGain(p, 3 * kBeat, transport(120.0, 9.5, false, false));
+    CHECK(minOver(g0, 0, kMs) < 0.005f);
+    CHECK(minOver(g0, kBeat - kMs, kBeat + kMs) < 0.005f);
+
+    // And reset() starts it over: a used Pump, reset, stopped at 3.6 (beat 4 is 0.4 beat on; the Pump left
+    // alone would be at beat 12.5, where it is 0.5 beat to the next).
+    Pump m;
+    Buf warm(static_cast<size_t>(3 * kBeat), 0.5f), warmR = warm;
+    run(m, p, warm, warmR, transport(120.0, 9.5, false));
+    m.reset();
+    Buf L3(static_cast<size_t>(3 * kBeat), 0.5f), R3 = L3;
+    run(m, p, L3, R3, transport(120.0, 3.6, false));
+    const Buf g3 = toGain(L3);
+    const int first3 = static_cast<int>(std::lround(0.4 * kBeat));
+    CHECK(holds(g3, 0, first3 - 2 * kMs, 1.0f));
+    CHECK(minOver(g3, first3 - kMs, first3 + kMs) < 0.005f);
+    CHECK(minOver(g3, first3 + kBeat - kMs, first3 + kBeat + kMs) < 0.005f);
 }
 
 // The first sample (rounded) at which the song position crosses each whole beat, per chunk: where
@@ -1011,9 +1154,11 @@ void pumpTests() {
     pumpEdges();
     pumpInput();
     pumpHats();
+    pumpKey();
     pumpBand();
     pumpMix();
     pumpStopped();
+    pumpSeededStopped();
     pumpFollowsJumps();
     pumpTempoChange();
     pumpShortestSteps();

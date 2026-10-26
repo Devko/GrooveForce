@@ -5,7 +5,8 @@
 //
 // The model. Everything runs on MPC's song position, in beats, so a loop, a locate, a tempo change
 // or a stopped transport can't put the Pump off the grid: each chunk starts from where MPC says the
-// song is (playing and valid), or from where the last chunk ended, advanced at the tempo. A step's
+// song is (playing and valid; the first chunk after reset() whenever valid), or from where the last
+// chunk ended, advanced at the tempo. A step's
 // bottom is where the duck reaches its lowest: step k of a rate r is straight time k r, which lands
 // in the audio at toSwung(k r) (grid.h: 66% swing puts the second 16th 40 ms late at 120 BPM), plus
 // the push, which is in milliseconds whatever the swing. The chunk's bottoms are worked out as
@@ -31,6 +32,12 @@
 // sample an onset); on starting up, or when Input is picked, its onsets are left alone for 60 ms
 // while it warms up on the audio.
 //
+// The key: process() can be handed a key, a stereo signal the detector listens to (through the same
+// low-pass) instead of the Pump's own input. A pad is ducked by the kick next to it, and the Pump on
+// the Echo hears the dry kick (Rumble). Null keys mean the Pump's own input, which is what the three
+// argument process() does. The key is only read: it may be the input's own buffers, or the chain's dry
+// ones, and a NaN or an infinity in it is silence, as in the input.
+//
 // Bands: Lows or Highs duck one side of a Linkwitz-Riley split (crossover.h) and let the other
 // through, the sum of the two being flat; Full ducks the input as it is. The split is only run while
 // something is ducked: at depth 0 (or mix 0) the Pump leaves the audio alone, bit for bit, and takes
@@ -42,7 +49,10 @@
 //
 // Depth and mix glide (two 5 ms one-poles); band, trigger, curve, length, rate, push and swing
 // changes take the level's slope limiter or a 10 ms crossfade. reset() forgets everything and the next
-// set() jumps to its targets.
+// set() jumps to its targets, and starts the grid from MPC's song position: the first set() after
+// reset() takes t.beats when it is valid, playing or not (stopped, the grid runs on from there at the
+// tempo; it used to start from beat 0, so its first bottom came at the wrong time). Without a valid
+// position it starts from 0.
 #include "common.h"
 #include "crossover.h"
 #include "grid.h"
@@ -78,7 +88,8 @@ public:
     Pump();
     void reset();
     void set(const Params& p, const ef::Transport& t);
-    void process(float* L, float* R, int n);
+    void process(float* L, float* R, int n) { process(L, R, n, nullptr, nullptr); }
+    void process(float* L, float* R, int n, const float* keyL, const float* keyR);   // Input listens to the key (both or neither), else to L / R
     int tailSamples() const { return band_ != kFull || fade_ > 0.0f ? kTail : 0; }   // 0 in Full; the crossover's ring when banded
 
 private:
