@@ -92,6 +92,16 @@ public:
     void process(float* L, float* R, int n, const float* keyL, const float* keyR);   // Input listens to the key (both or neither), else to L / R
     int tailSamples() const { return band_ != kFull || fade_ > 0.0f ? kTail : 0; }   // 0 in Full; the crossover's ring when banded
 
+    // Starts as another Pump is now (ruling R48): the instance that begins while its twin has been running (the
+    // wet's Pump of a part on All) takes the twin's grid, detector, detector low-pass, slews and level, so the two
+    // duck alike from the next sample whatever the trigger and the transport. What the audio left in the crossover
+    // is not taken, since it is the other bus's signal: the split is linear, so the twin keeps its own ring and
+    // this one starts with none, and the two together are what one split on the sum would be.
+    void copyStateFrom(const Pump& o) {
+        *this = o;
+        xo_.reset();
+    }
+
 private:
     static constexpr int kMaxBottoms = 6;      // bottoms near one chunk
     static constexpr int kMaxPending = 4;      // Input: bottoms scheduled and not yet reached

@@ -117,7 +117,7 @@ M ?=
 MOD_DEPS_shapes := dsp/pump_curves.cpp
 MOD_DEPS_shape := dsp/shapes.cpp dsp/pump_curves.cpp
 MOD_DEPS_pump := dsp/pump_curves.cpp
-MOD_DEPS_groove := dsp/pump.cpp dsp/shape.cpp dsp/shapes.cpp dsp/pump_curves.cpp
+MOD_DEPS_groove := dsp/pump.cpp dsp/shape.cpp dsp/shapes.cpp dsp/pump_curves.cpp dsp/echo.cpp dsp/echo_line.cpp dsp/time.cpp
 MOD_DEPS_echo_mod := dsp/shapes.cpp dsp/pump_curves.cpp
 # Moves play Time patterns (the suite drives dsp/time.cpp from them) and name them from the generated tables.
 MOD_DEPS_moves := plugin/moves.cpp dsp/time.cpp

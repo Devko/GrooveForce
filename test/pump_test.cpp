@@ -1143,6 +1143,75 @@ void pumpNanInput() {   // a NaN or an infinity in the input comes out as silenc
         }
 }
 
+// copyStateFrom() (ruling R48): a Pump that begins while its twin has been running begins as a copy of it. From the next
+// sample it ducks as the twin does, whatever the audio, on the Input trigger (a fresh one is deaf for 60 ms while its
+// detector warms up) and on a stopped transport (a fresh one starts its grid over). What the audio left in the
+// crossover is not copied: the copy has no ring where the twin has one.
+void pumpCopyState() {
+    const int lead = 4410, beats = 8, total = lead + beats * kBeat;
+    const size_t cut = 70560 + 704;   // a chunk start, shortly after the kick on the 4th beat: a duck is going on
+    Buf key(static_cast<size_t>(total), 0.0f);
+    for (int k = 0; k < beats; ++k) addKick(key, lead + k * kBeat, 0.8f);
+    const Buf dcA(static_cast<size_t>(total), 1.0f), dcB(static_cast<size_t>(total), -0.37f);
+    for (int trigger : {Pump::kInput, Pump::kGrid}) {
+        P p = hardPump();
+        p.trigger = trigger;
+        p.length = 0.3f;
+        const ef::Transport t = stopped(120.0);
+        Pump a, b, fresh;
+        Buf La = dcA, Lb = dcB, Lf = dcA, Ra = dcA, Rb = dcB, Rf = dcA;
+        for (size_t pos = 0; pos < static_cast<size_t>(total); pos += ef::kChunk) {
+            const int n = static_cast<int>(std::min(static_cast<size_t>(ef::kChunk), static_cast<size_t>(total) - pos));
+            if (pos == cut) b.copyStateFrom(a);
+            a.set(p, t);
+            a.process(&La[pos], &Ra[pos], n, &key[pos], &key[pos]);
+            if (pos >= cut) {
+                b.set(p, t);
+                b.process(&Lb[pos], &Rb[pos], n, &key[pos], &key[pos]);
+                fresh.set(p, t);
+                fresh.process(&Lf[pos], &Rf[pos], n, &key[pos], &key[pos]);
+            }
+        }
+        double worst = 0.0, apart = 0.0;
+        for (size_t i = cut; i < static_cast<size_t>(total); ++i) {
+            worst = std::max(worst, static_cast<double>(std::fabs(La[i] - Lb[i] / -0.37f)));
+            apart = std::max(apart, static_cast<double>(std::fabs(La[i] - Lf[i])));
+        }
+        CHECK(worst < 3e-7);   // the copy ducks as the twin does, on other audio, from its first sample
+        CHECK(apart > 0.3);    // (a fresh one does not)
+        CHECK(*std::min_element(La.begin() + static_cast<long>(cut), La.end()) < 0.1f);   // (and it ducks)
+    }
+
+    // A banded Pump: the copy has no ring, the twin keeps its own; with silence in both, only the twin rings.
+    P lows = hardPump();
+    lows.band = Pump::kLows;
+    lows.depth = 1.0f;
+    const Buf noise = whiteNoise(20000, 0.5f, 3);
+    Pump a, b;
+    Buf L = noise, R = noise;
+    const ef::Transport t = playingAt(120.0, 0.0);
+    {
+        ef::Transport tr = t;
+        for (size_t pos = 0; pos < L.size(); pos += ef::kChunk) {
+            a.set(lows, tr);
+            a.process(&L[pos], &R[pos], ef::kChunk);
+            tr.beats += ef::kChunk / static_cast<double>(ef::kRate) * tr.bpm / 60.0;
+        }
+        b.copyStateFrom(a);
+        Buf za(400, 0.0f), zb(400, 0.0f), zar = za, zbr = zb;
+        for (size_t pos = 0; pos < 400; pos += ef::kChunk) {
+            const int n = static_cast<int>(std::min<size_t>(ef::kChunk, 400 - pos));
+            a.set(lows, tr);
+            a.process(&za[pos], &zar[pos], n);
+            b.set(lows, tr);
+            b.process(&zb[pos], &zbr[pos], n);
+            tr.beats += n / static_cast<double>(ef::kRate) * tr.bpm / 60.0;
+        }
+        CHECK(peak(za) > 1e-3f);          // the twin's crossover rings on
+        CHECK(peak(zb) == 0.0f);          // the copy's has nothing in it
+    }
+}
+
 } // namespace
 
 void pumpTests() {
@@ -1171,4 +1240,5 @@ void pumpTests() {
     pumpCrossoverLeap();
     pumpReset();
     pumpNanInput();
+    pumpCopyState();
 }
