@@ -147,7 +147,7 @@ divisions and flag transfers that stall), which the device's p99 over its averag
   the Echo: a four-point Hermite and a state-variable filter per line and side, per sample, and a second head
   while a time change fades.
 - **Time** met its budget only after work (next paragraph): Roll Build 1 Bar went from 140.2k at p99 (3.2-3.9
-  points) to 60.0k. In a Move the rest of the cost is the engine's: `Engine::render` compares the 232-float
+  points) to 60.0k. In a Move the rest of the cost is the engine's: `Engine::render` compares the 229-float
   snapshot with the one the chain was made from (`memcmp`) every chunk, 5.0k a block, 12% of case 7, to find out
   whether a Move changed anything; `Moves::apply`, `Groove::set` and the plugin's `runBlock` are 1.5k, 1.2k and
   1.2k. The playhead itself is about 27k.
