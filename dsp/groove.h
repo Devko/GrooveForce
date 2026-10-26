@@ -31,6 +31,12 @@
 // part. The Pump's Input trigger and the Echo's duck, Env and Follow listen to it, whatever the target:
 // Rumble, a Pump on the Echo with the Input trigger, hears the dry kick and not the echo it ducks.
 //
+// A change of the order is a crossfade (ruling R50). What the Echo hears is the dry before Shape and Pump (Echo
+// first) or after them (Echo last). When the order flips, the Echo's source crosses from the one to the other
+// over 10 ms, so that a part moving the dry with a gain other than 1 does not step the line (the step would be
+// heard one delay later, as a click). Settled, it hears the one or the other itself, bit for bit; for those 10 ms
+// it hears a blend of the two.
+//
 // `dry` scales the dry bus where it joins the wet (R29). The send, the key and the mix's input side are
 // not scaled, so the echo goes on ringing with the dry turned off (Break); the wet is not scaled.
 //
@@ -43,7 +49,8 @@
 // output (the Echo's is a fade of the wet), and a part that is off and faded out is neither set nor run:
 // it costs no work (running() counts the parts that ran in the last chunk: Shape, Pump, Echo, Time; Time's
 // ring excepted, below). It comes back from cleared state, as a rack module does (the Pump's input detector
-// warms up for 60 ms, as at start-up), unless it comes back before its fade-out is over.
+// warms up for 60 ms, as at start-up), unless it comes back before its fade-out is over. Time is the exception:
+// it comes back with what its ring recorded (below).
 //
 // Two instances begin alike (ruling R48). Both instances of a part that comes on together come on in the same
 // chunk, from cleared state. An instance that begins while its twin on the other bus has been running (the Echo
@@ -148,7 +155,7 @@ private:
 
     // A part, or one instance of it, as the chain sees it.
     struct Part {
-        int where = 0;          // where it works (Time's place); the parameter's, once it has faded out
+        int where = 0;          // Time's: the place it works at (the parameter's, once it has faded out)
         float fade = 0.0f;      // 0..1: the share of its output that is heard
         float goal = 0.0f;      // where the fade is going
         bool dirty = false;     // has run since it was last reset
@@ -158,11 +165,12 @@ private:
         bool audible() const { return fade > 0.0f || goal > 0.0f; }
     };
 
-    template <class M> bool arm(M& m, Part& s, bool want, int where);
+    template <class M> bool arm(M& m, Part& s, bool want);
     template <class M> void join(M& dry, const Part& dryPart, M& wet, Part& wetPart);
     void armTime(const Params& p, const ef::Transport& t);
     template <class F> void runPart(Part& s, float* L, float* R, int n, F&& process);
     void listen(float* L, float* R, int n);
+    void timeProcess(float* l, float* r, int k);
     void makeWet(const float* L, const float* R, int n);
 
     Shape shape_, shapeWet_;    // the instances for the dry and for the wet
@@ -173,6 +181,7 @@ private:
     ef::Ramp in_, out_, mix_, dry_;   // gains, the mix and the dry level, as linear factors
     bool fresh_ = true;         // the next set() jumps to its targets
     bool echoLast_ = false;     // the Echo comes after Shape and Pump in this chunk
+    float sendMix_ = 0.0f;      // what the Echo hears: 0 the dry before Shape and Pump (Echo first), 1 after them; crosses in 10 ms
     bool listening_ = false;    // Time is off, its ring is allocated, and it records the audio at its place
     int running_ = 0;
     float inputL_[ef::kChunk] = {}, inputR_[ef::kChunk] = {};   // the chain's input, for the mix
