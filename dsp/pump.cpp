@@ -4,8 +4,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <type_traits>
 
 namespace gf {
+
+// copyStateFrom() is a plain copy of the object: no allocation, nothing to fix up.
+static_assert(std::is_trivially_copyable<Pump>::value, "Pump is copied bit for bit");
 
 namespace {
 

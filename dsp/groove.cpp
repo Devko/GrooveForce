@@ -24,7 +24,7 @@ float gainOf(float db) {
     return db == 0.0f ? 1.0f : ef::dbToGain(db);
 }
 
-// How much input Time must have heard before its groove is asked for: the groove's longest lag, a crossfade and a
+// How much input Time's ring must have recorded before its groove is asked for: the groove's longest lag, a crossfade and a
 // chunk. Until then the ring holds nothing where the lag would read.
 int warmSamples(const Time::Params& tp, const ef::Transport& t) {
     const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);   // as Time takes it
@@ -64,6 +64,7 @@ void Groove::reset() {
     shapePart_ = shapeWetPart_ = pumpPart_ = pumpWetPart_ = echoPart_ = timePart_ = Part();
     fresh_ = true;
     echoLast_ = false;
+    listening_ = false;
     running_ = 0;
 }
 
@@ -80,19 +81,63 @@ template <class M>
 bool Groove::arm(M& m, Part& s, bool want, int where) {
     if (fresh_ || s.fade == 0.0f) s.where = where;
     s.goal = want && where == s.where ? 1.0f : 0.0f;
-    if (fresh_) {
-        s.fade = s.goal;
-        s.age = kSettled;
-    }
-    if (s.goal > 0.0f && s.fade == 0.0f) {   // coming on from rest
-        if (s.dirty) {
-            m.reset();
-            s.dirty = false;
-        }
-        s.age = 0;
+    if (fresh_) s.fade = s.goal;
+    s.woke = s.goal > 0.0f && s.fade == 0.0f;   // coming on from rest
+    if (s.woke && s.dirty) {
+        m.reset();
+        s.dirty = false;
     }
     s.runs = s.audible();
     return s.runs;
+}
+
+// An instance that begins while its twin on the other bus has been running begins as a copy of it (ruling R48): the
+// two duck, or move, alike from the first sample, whatever the trigger and the transport. The audio state is not
+// copied (see copyStateFrom()). When it is the Echo that begins (the wet bus starts with it), the instance starts as
+// far in as its twin; when a target moves, it fades in.
+template <class M>
+void Groove::join(M& dry, const Part& dryPart, M& wet, Part& wetPart) {
+    if (wetPart.woke && dryPart.runs && !dryPart.woke) {
+        wet.copyStateFrom(dry);
+        if (echoPart_.woke && dryPart.goal > 0.0f) wetPart.fade = dryPart.fade;
+    } else if (dryPart.woke && wetPart.runs && !wetPart.woke) {
+        dry.copyStateFrom(wet);
+    }
+}
+
+// Time. Its ring records whenever it is allocated (ruling R42), so a Move that reads the past (Reverse Beat, Rewind,
+// Spin-Back, Tape Stop) finds it: on, Time plays; off, it listens (set and run on a copy of the audio at its place, the
+// output untouched). Coming on from rest therefore keeps what the ring holds, and `age` counts what it has recorded
+// since it was cleared. It is cleared when its place moves while it rests (the ring then holds another signal), and by
+// reset(). A groove waits for the ring to hold what it reads back (see warmSamples()).
+void Groove::armTime(const Params& p, const ef::Transport& t) {
+    Part& s = timePart_;
+    const bool allocated = time_.allocated();
+    const int place = placeOf(p.timePlace);
+    if (fresh_ || s.fade == 0.0f) {
+        if (!fresh_ && s.where != place) {   // it recorded at the other place
+            time_.reset();
+            s.age = 0;
+        }
+        s.where = place;
+    }
+    s.goal = p.timeOn && allocated && place == s.where ? 1.0f : 0.0f;
+    if (fresh_) {
+        s.fade = s.goal;
+        s.age = s.goal > 0.0f ? kSettled : 0;   // on from the first chunk: nothing to wait for
+    }
+    s.runs = s.audible();
+    listening_ = allocated && !s.runs;
+    Time::Params tp = p.time;
+    tp.swing = p.swing;   // Time swings the audio by the global Swing itself
+    if (s.runs) {
+        if (s.age < warmSamples(tp, t)) tp.groove = Time::kOff;   // warming up: it only records
+    } else {
+        tp.groove = Time::kOff;   // listening: nothing to play
+        tp.pattern = -1;
+        tp.loop = false;
+    }
+    if (s.runs || listening_) time_.set(tp, t);
 }
 
 void Groove::set(const Params& p, const ef::Transport& t) {
@@ -120,12 +165,7 @@ void Groove::set(const Params& p, const ef::Transport& t) {
         ep.swing = swing;
         echo_.set(ep, t);
     }
-    if (arm(time_, timePart_, p.timeOn && time_.allocated(), placeOf(p.timePlace))) {
-        Time::Params tp = p.time;
-        tp.swing = p.swing;   // Time swings the audio by the global Swing itself
-        if (timePart_.age < warmSamples(tp, t)) tp.groove = Time::kOff;   // warming up: it only records
-        time_.set(tp, t);
-    }
+    armTime(p, t);
 
     // Shape and Pump, each on the buses its target names. The wet's instance begins together with the Echo, and with
     // the dry's whenever both begin at once; both are given the same parameters, the same grid and (the Pumps) the
@@ -134,6 +174,7 @@ void Groove::set(const Params& p, const ef::Transport& t) {
     const int shapeTarget = targetOf(p.shapeTarget), pumpTarget = targetOf(p.pumpTarget);
     const bool sd = arm(shape_, shapePart_, p.shapeOn && onDry(shapeTarget, echoLast_), 0);
     const bool sw = arm(shapeWet_, shapeWetPart_, p.shapeOn && onWet(shapeTarget, echoLast_, wetSounds), 0);
+    join(shape_, shapePart_, shapeWet_, shapeWetPart_);
     if (sd || sw) {
         Shape::Params sp = p.shape;
         sp.swing = swing;
@@ -142,6 +183,7 @@ void Groove::set(const Params& p, const ef::Transport& t) {
     }
     const bool pd = arm(pump_, pumpPart_, p.pumpOn && onDry(pumpTarget, echoLast_), 0);
     const bool pw = arm(pumpWet_, pumpWetPart_, p.pumpOn && onWet(pumpTarget, echoLast_, wetSounds), 0);
+    join(pump_, pumpPart_, pumpWet_, pumpWetPart_);
     if (pd || pw) {
         Pump::Params pp = p.pump;
         pp.swing = swing;
@@ -171,6 +213,15 @@ void Groove::runPart(Part& s, float* L, float* R, int n, F&& process) {
         R[i] = givenR_[i] + (R[i] - givenR_[i]) * g;
     }
     s.fade = g;
+}
+
+// Time off: its ring records L / R and what it would play goes nowhere. At rest it leaves its input alone, but it may
+// still be settling from the last thing it played, so it is given a copy.
+void Groove::listen(float* L, float* R, int n) {
+    std::memcpy(givenL_, L, sizeof(float) * static_cast<size_t>(n));
+    std::memcpy(givenR_, R, sizeof(float) * static_cast<size_t>(n));
+    time_.process(givenL_, givenR_, n);
+    timePart_.age = static_cast<int>(std::min<int64_t>(static_cast<int64_t>(timePart_.age) + n, kSettled));
 }
 
 // The wet bus: the Echo hears L / R (the send's source) and the key, and what it makes is faded in or out as the
@@ -215,7 +266,10 @@ void Groove::process(float* L, float* R, int n) {
 
     // Time, Pre: it bends the input before anything hears it, the key included.
     auto timeProcess = [this](float* l, float* r, int k) { time_.process(l, r, k); };
-    if (timePart_.runs && timePart_.where == kPre) runPart(timePart_, L, R, n, timeProcess);
+    if (timePart_.where == kPre) {
+        if (timePart_.runs) runPart(timePart_, L, R, n, timeProcess);
+        else if (listening_) listen(L, R, n);
+    }
 
     // The key: the chain's input, for the Pump's Input trigger (both buses) and the Echo's duck and modulators.
     const bool echoRuns = echoPart_.runs;
@@ -264,7 +318,10 @@ void Groove::process(float* L, float* R, int n) {
     }
 
     // Time, Post: it bends the sum of the buses.
-    if (timePart_.runs && timePart_.where == kPost) runPart(timePart_, L, R, n, timeProcess);
+    if (timePart_.where == kPost) {
+        if (timePart_.runs) runPart(timePart_, L, R, n, timeProcess);
+        else if (listening_) listen(L, R, n);
+    }
 
     running_ = (shapePart_.runs || shapeWetPart_.runs ? 1 : 0) + (pumpPart_.runs || pumpWetPart_.runs ? 1 : 0) + (echoRuns ? 1 : 0) +
                (timePart_.runs ? 1 : 0);

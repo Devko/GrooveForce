@@ -1385,6 +1385,177 @@ void grooveStepSwingEcho() {
     CHECK(same(render(off, in), L));
 }
 
+// Ruling R48: an instance that begins while its twin on the other bus has been running begins as a copy of it, so
+// the two duck (or move) alike from the first sample, whatever the trigger and the transport. The Echo is switched
+// on in the middle of a duck: the wet's Pump is where the dry's is, and the Groove is the part alone on the sum.
+void grooveWetStartsWhereDryIs() {
+    const Buf in = kickPad(6, 4410);
+    const size_t X = 26560, N = in.size();   // a chunk start, just after the kick at 26460: the duck is going on
+    P base;
+    echoFree(base, 3.0f);
+    base.echo.line[0].p.feedback = 0.6f;
+    auto echoLate = [&](P& x, size_t at) { x.echoOn = at >= X; };
+    Pump::Params input;
+    input.trigger = Pump::kInput;
+    input.curve = gf::PC_HARD;
+    input.depth = 1.0f;
+    input.length = 0.3f;
+    Pump::Params lows = input;
+    lows.band = Pump::kLows;
+    lows.crossoverHz = 150.0f;
+    Pump::Params grid;
+    grid.depth = 0.9f;
+    grid.rateBeats = 0.5;
+    grid.length = 0.5f;
+    Shape::Params sp;
+    sp.lane[Shape::kVolume] = {true, shapeIdx("Square"), 1.0, 0.7f, 0.0f};
+    sp.lane[Shape::kFilter] = {true, shapeIdx("Sine"), 2.0, 1.0f, 0.0f};
+    sp.lane[Shape::kPan] = {true, shapeIdx("Triangle"), 4.0, 0.5f, 0.0f};
+    sp.cutoffHz = 800.0f;
+    sp.resonance = 0.6f;
+
+    for (const Transport& t : {playingAt(0.0), transport(120.0, 0.0, false)}) {
+        const Played sum = play(in, base, t, echoLate);   // dry + wet, the part off
+        CHECK(peak(minus(part(sum.out, X + 200, X + 1500), part(in, X + 200, X + 1500))) > 0.05f);   // (the wet is there at once)
+        for (const Pump::Params* pp : {&input, &lows, &grid}) {
+            const Buf* key = pp->trigger == Pump::kInput ? &in : nullptr;
+            P p = base;
+            p.pumpOn = true;
+            p.pump = *pp;
+            p.pumpTarget = Groove::kAll;
+            const Played got = play(in, p, t, echoLate);
+            const Buf want = pumpAlone(*pp, sum.out, key, t);
+            CHECK(maxDiff(part(got.out, X, N), part(want, X, N)) < 2e-5);        // from the first sample after the switch
+            CHECK(maxDiff(part(got.out, X, N), part(sum.out, X, N)) > 0.05);     // (and it ducks)
+            CHECK(maxDiff(part(got.out, X, X + 600), part(sum.out, X, X + 600)) > 0.01);   // (including right there)
+        }
+        P sh = base;
+        sh.shapeOn = true;
+        sh.shape = sp;
+        sh.shapeTarget = Groove::kAll;
+        const Played got = play(in, sh, t, echoLate);
+        CHECK(maxDiff(part(got.out, X, N), part(shapeAlone(sp, sum.out, t), X, N)) < 2e-5);
+        CHECK(maxDiff(part(got.out, X, N), part(sum.out, X, N)) > 0.05);
+
+        // A part's target moved onto the bus the part was not on, with the echo sounding: Dry to All (the wet's
+        // instance begins), Echo to All (the dry's begins). Once the 10 ms fade-in is over they are one Pump (Shape) on
+        // the sum. (A Shape's filter starts with nothing in it, on a signal that is already going: it rings for a while
+        // before it is the filter on the sum, so this one has the gains of the Volume and Pan lanes only.)
+        Shape::Params gains = sp;
+        gains.lane[Shape::kFilter].on = false;
+        P both = base;
+        both.echoOn = true;
+        const Played all = play(in, both, t, [](P&, size_t) {});   // dry + wet from the start
+        for (int from : {Groove::kDry, Groove::kEcho}) {
+            auto move = [&](P& x, size_t at) { x.pumpTarget = at >= X ? Groove::kAll : from; };
+            P p = both;
+            p.pumpOn = true;
+            p.pump = input;
+            const Played got = play(in, p, t, move);
+            CHECK(maxDiff(part(got.out, X + 500, N), part(pumpAlone(input, all.out, &in, t), X + 500, N)) < 2e-5);
+            P q = both;
+            q.shapeOn = true;
+            q.shape = gains;
+            auto moveShape = [&](P& x, size_t at) { x.shapeTarget = at >= X ? Groove::kAll : from; };
+            const Played gs = play(in, q, t, moveShape);
+            CHECK(maxDiff(part(gs.out, X + 500, N), part(shapeAlone(gains, all.out, t), X + 500, N)) < 2e-5);
+            CHECK(maxDiff(part(gs.out, X + 500, N), part(all.out, X + 500, N)) > 0.05);
+        }
+    }
+}
+
+// Ruling R42: while Time's ring is allocated the Groove feeds it the audio at Time's place even when Time is off
+// (record only: the output is untouched), so a Move that reads the past finds it. Never allocated: no work.
+void grooveTimeListens() {
+    const Buf noise = whiteNoise(6 * kBeat, 0.4f, 11);
+    const Transport t = playingAt(0.0);
+    // Off and allocated: bit for bit, listening, no part runs. Not allocated: nothing listens.
+    for (int place = 0; place < 2; ++place) {
+        P p;
+        p.time.groove = Time::kPush;
+        p.time.amount = 1.0f;
+        p.time.pattern = timePat("Reverse Beat");
+        p.time.patternStart = 1.0;
+        p.timePlace = place;
+        Groove g;
+        Buf L = noise, R = noise;
+        Transport tr = t;
+        bool never = true, listens = true, idle = true;
+        for (size_t pos = 0; pos < L.size(); pos += kChunk) {
+            const int n = static_cast<int>(std::min(static_cast<size_t>(kChunk), L.size() - pos));
+            if (pos == 8192) CHECK(g.allocateTime());
+            g.set(p, tr);
+            g.process(&L[pos], &R[pos], n);
+            if (pos < 8192) never = never && !g.listening();
+            else listens = listens && g.listening();
+            idle = idle && g.running() == 0 && g.tailSamples() == 0;
+            tr.beats += n / static_cast<double>(kRate) * tr.bpm / 60.0;
+        }
+        CHECK(never && listens && idle);
+        CHECK(same(L, noise) && same(R, noise));
+    }
+    // Time on is not listening, it plays; off again, it listens once it has faded out.
+    {
+        P p;
+        p.time.groove = Time::kPush;
+        p.time.amount = 1.0f;
+        Groove g;
+        CHECK(g.allocateTime());
+        Buf L = noise, R = noise;
+        Transport tr = t;
+        bool ok = true;
+        for (size_t pos = 0; pos < 20480; pos += kChunk) {
+            p.timeOn = pos >= 4096 && pos < 12288;
+            g.set(p, tr);
+            g.process(&L[pos], &R[pos], kChunk);
+            if (pos < 4096 || pos >= 12288 + 2 * kChunk + 441) ok = ok && g.listening();
+            else if (pos >= 4096 && pos < 12288 + 441) ok = ok && !g.listening();
+            tr.beats += kChunk / static_cast<double>(kRate) * tr.bpm / 60.0;
+        }
+        CHECK(ok);
+    }
+
+    // Reverse Beat two seconds on: Time is switched on a tenth of a beat before the Move starts (beat 3) and plays the
+    // beat before it, backwards, as a Time that had been on all along would. With no past (the memory arriving at the
+    // switch) there would be nothing to play.
+    {
+        const int rev = timePat("Reverse Beat");
+        const size_t S = 3 * kBeat, on = 63936;   // the Move's start; the switch, a chunk start 2214 samples before it
+        P p;
+        p.time.pattern = rev;
+        p.time.patternStart = 3.0;
+        auto switchOn = [&](P& x, size_t at) { x.timeOn = at >= on; };
+        P all = p;
+        all.timeOn = true;
+        const Played listened = playLate(noise, p, t, switchOn, 0);
+        const Played ref = playLate(noise, all, t, [](P&, size_t) {}, 0);
+        const Played cold = playLate(noise, p, t, switchOn, on);
+        CHECK(same(part(listened.out, 0, on), part(noise, 0, on)));
+        CHECK(maxDiff(part(listened.out, S, S + kBeat + 1000), part(ref.out, S, S + kBeat + 1000)) < 1e-6);
+        CHECK(peak(listened.out, S + 5000, S + kBeat - 1000) > 0.1f);   // the beat before, not silence
+        CHECK(peak(cold.out, S + 5000, S + kBeat - 1000) < 0.01f);      // (with no past it is)
+    }
+
+    // The ring is cleared when Time's place moves while it rests (it holds the other place's signal): switched on
+    // right after, Time waits for its groove's history; with the place unmoved it engages at once.
+    {
+        const Buf s = sine(110.0, 24576, 0.5f);
+        P p;
+        p.time.groove = Time::kPush;
+        p.time.amount = 1.0f;
+        const size_t X = 8192;
+        auto moved = [&](P& x, size_t at) {
+            x.timeOn = at >= X;
+            x.timePlace = at >= X - 64 ? Groove::kPre : Groove::kPost;
+        };
+        auto stayed = [&](P& x, size_t at) { x.timeOn = at >= X; };
+        const Played a = playLate(s, p, t, moved, 0), b = playLate(s, p, t, stayed, 0);
+        CHECK(same(part(a.out, X, X + 1000), part(s, X, X + 1000)));    // an empty ring: the input passes
+        CHECK(!same(part(b.out, X, X + 1000), part(s, X, X + 1000)));   // the past is there: it pushes at once
+        CHECK(clickFree(a.out, X - 4096, X, X + 4096) && clickFree(b.out, X - 4096, X, X + 4096));
+    }
+}
+
 // Rumble: a Pump on the Echo with the Input trigger ducks the repeats at the dry's kicks, and not at the
 // repeats' own onsets.
 void grooveRumbleKey() {
@@ -1510,7 +1681,9 @@ void firstSwitchOn() {
         // ... and after the late memory it fades in just the same
         CHECK(wetFade(s, later.out, 1000.0, 0.5f, 88.2, X + 96, true));
     }
-    // Time: Push, 20 ms late. A low sine: the fade is a crossfade between the input and the same tone later.
+    // Time: Push, 20 ms late. A low sine: the fade is a crossfade between the input and the same tone later. Once
+    // allocated, the ring listens whether Time is on or not (R42), so a Time that is switched on finds the past and
+    // engages its groove at once; one whose memory arrives with the switch has an empty ring, and waits (warms up).
     {
         const Buf s = sine(110.0, 24576, 0.5f);
         P p;
@@ -1518,23 +1691,27 @@ void firstSwitchOn() {
         p.time.amount = 1.0f;
         auto switchOn = [&](P& x, size_t at) { x.timeOn = at >= X; };
         auto always = [](P&, size_t) {};
-        const Played before = playLate(s, p, t, switchOn, 0);
+        const Played before = playLate(s, p, t, switchOn, 0);   // the memory first, the ring listening, the switch at X
         P q = p;
         q.timeOn = true;
-        const Played late = playLate(s, q, t, always, X);
-        CHECK(same(before.out, late.out));
-        CHECK(same(part(late.out, 0, X), part(s, 0, X)));
+        const Played late = playLate(s, q, t, always, X);       // on from the start, the memory at X: an empty ring
+        CHECK(same(part(before.out, 0, X), part(s, 0, X)) && same(part(late.out, 0, X), part(s, 0, X)));
         for (size_t c = 0; c < X / kChunk; ++c) CHECK(before.running[c] == 0 && late.running[c] == 0);
-        CHECK(before.running[X / kChunk] == 1);
-        CHECK(clickFree(before.out, X - 4096, X, X + 4096));
-        CHECK(maxDiff(part(before.out, X + 2000, 24576), part(s, X + 2000, 24576)) > 0.3);   // it pushes
-        // It warms up: until the ring holds the 20 ms the groove reads back (and a crossfade and a chunk) the input
-        // passes, and there is no hole where the lag would read what was never recorded.
-        CHECK(same(part(before.out, X, X + 1100), part(s, X, X + 1100)));
-        bool noHole = true;
-        for (size_t w = X; w < X + 3000; w += 100) noHole = noHole && peak(before.out, w, w + 401) > 0.4f;
-        CHECK(noHole);
-        CHECK(allFinite(before.out));
+        CHECK(before.running[X / kChunk] == 1 && late.running[X / kChunk] == 1);
+        CHECK(clickFree(before.out, X - 4096, X, X + 4096) && clickFree(late.out, X - 4096, X, X + 4096));
+        CHECK(!same(part(before.out, X, X + 1100), part(s, X, X + 1100)));   // it pushes at once ...
+        CHECK(same(part(late.out, X, X + 1100), part(s, X, X + 1100)));      // ... and this one passes the input until the ring holds the 20 ms
+        CHECK(maxDiff(part(before.out, X + 2000, 24576), part(s, X + 2000, 24576)) > 0.3);
+        CHECK(maxDiff(part(late.out, X + 2000, 24576), part(s, X + 2000, 24576)) > 0.3);
+        // Neither drops out where the lag would read what was never recorded.
+        bool noHole = true, noHoleLate = true;
+        for (size_t w = X; w < X + 3000; w += 100) {
+            noHole = noHole && peak(before.out, w, w + 401) > 0.3f;
+            noHoleLate = noHoleLate && peak(late.out, w, w + 401) > 0.3f;
+        }
+        CHECK(noHole && noHoleLate);
+        CHECK(maxDiff(part(before.out, X + 3000, 24576), part(late.out, X + 3000, 24576)) < 1e-5);   // and then they are the same
+        CHECK(allFinite(before.out) && allFinite(late.out));
     }
     // Everything at once, with the Pump and the Shape on All, and the Echo's order and Time's place in every combination.
     {
@@ -1638,12 +1815,17 @@ void grooveTimeSwitch() {
         else if (at < 12288 + 441) busy = busy && r.running[c] == 1;
     }
     CHECK(idle && busy);
-    // Back from cleared state.
+    // Back: the ring went on listening, so Time comes back with its past, as one that was allocated at the start and
+    // first switched on there; one whose memory comes with the switch has an empty ring and waits.
     {
         auto again = [](P& x, size_t at) { x.timeOn = at < 12288 || at >= 30720; };
         auto never = [](P& x, size_t at) { x.timeOn = at >= 30720; };
-        const Played a = play(s, p, playingAt(0.0), again), b = play(s, p, playingAt(0.0), never);
+        const Played a = play(s, p, playingAt(0.0), again);
+        const Played b = playLate(s, p, playingAt(0.0), never, 0);
+        const Played c = play(s, p, playingAt(0.0), never);
         CHECK(maxDiff(part(a.out, 30720, 49152), part(b.out, 30720, 49152)) < 1e-6);
+        CHECK(same(part(c.out, 30720, 30720 + 1100), part(s, 30720, 30720 + 1100)));
+        CHECK(maxDiff(part(c.out, 30720 + 3000, 49152), part(a.out, 30720 + 3000, 49152)) < 1e-5);
     }
     // The place: Pre to Post and back, always running, no click.
     {
@@ -1862,6 +2044,8 @@ void grooveTests() {
     grooveStepSwingRule();
     grooveKeyAfterTime();
     grooveStepSwingEcho();
+    grooveWetStartsWhereDryIs();
+    grooveTimeListens();
     grooveRumbleKey();
     grooveDry();
     firstSwitchOn();

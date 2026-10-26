@@ -41,18 +41,36 @@
 //
 // Every part can be switched on and off. A switch is a 10 ms crossfade between the part's input and its
 // output (the Echo's is a fade of the wet), and a part that is off and faded out is neither set nor run:
-// it costs no work (running() counts the parts that ran in the last chunk: Shape, Pump, Echo, Time). It
-// comes back from cleared state, as a rack module does (the Pump's input detector warms up for 60 ms, as
-// at start-up), unless it comes back before its fade-out is over. Both instances of a part come on in the
-// same chunk, so their grids and detectors begin together; the wet's instance begins when the wet starts
-// to sound.
+// it costs no work (running() counts the parts that ran in the last chunk: Shape, Pump, Echo, Time; Time's
+// ring excepted, below). It comes back from cleared state, as a rack module does (the Pump's input detector
+// warms up for 60 ms, as at start-up), unless it comes back before its fade-out is over.
+//
+// Two instances begin alike (ruling R48). Both instances of a part that comes on together come on in the same
+// chunk, from cleared state. An instance that begins while its twin on the other bus has been running (the Echo
+// coming on under a Pump on All, or a target moving onto the bus the part was not on) begins as a copy of it
+// (copyStateFrom() of Pump and Shape): the grid's phase, the Pump's detector with its low-pass and warm-up, the
+// slews and the lanes are the twin's, so the two duck and move alike from the first sample, whatever the trigger
+// and the transport. What the audio left in the twin's crossover or filter is not copied (it is the other bus's
+// signal): both are linear, so the twin keeps its own ring, the copy starts with none, and together they are
+// one crossover or filter on the sum. When the Echo itself comes on, the copy starts as far in as the twin (the
+// wet is silent and fades in on its own); when a target moves, it fades in over 10 ms like any part. A filter
+// that starts on a wet that is already sounding rings in for a while: that is what a filter does on its first
+// samples.
+//
+// Time's ring listens (ruling R42). While it is allocated and Time is off, the audio at Time's place goes into
+// it all the same, on a copy and with no groove or pattern, so the output is untouched, bit for bit, and a Move
+// that reads the past (Reverse Beat, Rewind, Spin-Back, Tape Stop) always finds it. That is the one thing a part
+// that is off costs: a set() and a write of each sample (listening() says so; running() does not count it). A
+// ring that was never allocated is not fed. The ring is cleared by reset(), and when Time's place moves while
+// it rests (it holds the other place's signal); a Time that comes on keeps what it has.
 //
 // Time warms up. Its groove asks for a lag, which reads the ring behind now, and a ring that has just begun
 // to record holds nothing there: the output would drop out for the length of the lag and then step to the
-// first sample recorded. So a Time that comes on from rest passes its input (recording) until it has heard
-// as much as the groove's longest lag and a crossfade, and only then engages the groove, by its own
-// crossfade. A Move's pattern is not held back, since it has its own start on the grid. A Time that is on
-// from the first chunk (the chain was just reset) has nothing to wait for and does not warm up.
+// first sample recorded. So a Time whose ring has recorded less than the groove's longest lag and a crossfade
+// passes its input (recording) until it has, and only then engages the groove, by its own crossfade. With the
+// ring listening that is only the first moments after it was allocated or cleared. A Move's pattern is not
+// held back, since it has its own start on the grid. A Time that is on from the first chunk (the chain was
+// just reset) has nothing to wait for and does not warm up.
 //
 // Memory. The Echo's lines and Time's ring are allocated on the UI thread by allocate() (the plugin calls
 // it when a switch goes on) and handed over to the audio thread through an atomic pointer inside each
@@ -103,6 +121,7 @@ public:
     void process(float* L, float* R, int n);
     int tailSamples() const;   // the longest ring of a part that is heard or fading
     int running() const { return running_; }   // parts run in the last process(): 0 when all four are off
+    bool listening() const { return listening_; }   // Time's ring is being fed while Time is off (R42); not a part that runs
 
     // UI thread: the memory of the parts the parameters switch on (the Echo's lines, Time's ring), once.
     // False if there was none to be had; the part then stays silent. Call it before the audio thread sees
@@ -133,13 +152,17 @@ private:
         float fade = 0.0f;      // 0..1: the share of its output that is heard
         float goal = 0.0f;      // where the fade is going
         bool dirty = false;     // has run since it was last reset
-        int age = 0;            // samples it has run since it came on from rest (Time warms up)
+        bool woke = false;      // comes on from rest in this chunk
+        int age = 0;            // Time's: samples its ring has recorded since it was cleared (Time warms up)
         bool runs = false;      // runs in this chunk
         bool audible() const { return fade > 0.0f || goal > 0.0f; }
     };
 
     template <class M> bool arm(M& m, Part& s, bool want, int where);
+    template <class M> void join(M& dry, const Part& dryPart, M& wet, Part& wetPart);
+    void armTime(const Params& p, const ef::Transport& t);
     template <class F> void runPart(Part& s, float* L, float* R, int n, F&& process);
+    void listen(float* L, float* R, int n);
     void makeWet(const float* L, const float* R, int n);
 
     Shape shape_, shapeWet_;    // the instances for the dry and for the wet
@@ -150,6 +173,7 @@ private:
     ef::Ramp in_, out_, mix_, dry_;   // gains, the mix and the dry level, as linear factors
     bool fresh_ = true;         // the next set() jumps to its targets
     bool echoLast_ = false;     // the Echo comes after Shape and Pump in this chunk
+    bool listening_ = false;    // Time is off, its ring is allocated, and it records the audio at its place
     int running_ = 0;
     float inputL_[ef::kChunk] = {}, inputR_[ef::kChunk] = {};   // the chain's input, for the mix
     float givenL_[ef::kChunk] = {}, givenR_[ef::kChunk] = {};   // what a fading part was given
