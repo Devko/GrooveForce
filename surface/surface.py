@@ -15,6 +15,7 @@ Writes, next to this file:
   build/factory_presets.h  the factory presets (presets/Factory/*/*.gfp), checked and embedded
   build/shape_data.h  the shape library (SHAPES), checked: the data dsp/shapes.cpp evaluates
   build/time_data.h  the Time patterns (TIME_PATTERNS), checked: the data dsp/time.cpp plays
+  build/move_data.h  the 16 Moves (MOVES), checked: the data plugin/moves.cpp plays
   build/skin_style.json  the palette, knob looks, primary buttons and page groups for
                      skin_polish.py, which `make skin` runs after the generator
 
@@ -1490,7 +1491,9 @@ TIME_PATTERNS = [
     _pattern("Slow Down", BAR, False, _rejoin(_speed_ramp(BAR, 1.0, 0.5, 64)), _flat(BAR)),
     # backwards
     _pattern("Reverse Beat", 1.0, False, _rejoin([(0.0, 0.0, "line"), (1.0, -1.0, "line")]), _flat(1.0)),
-    _pattern("Spin-Back", 0.5, False, [(0.0, 0.0, "smooth"), (0.5, -1.0, "line")],
+    # already backwards at the first sample, then faster (speed -1 to -3): the level follows the speed, so a speed that
+    # starts at 0 would leave a hole of ~8 ms at the start. Ends in silence, 1 beat back.
+    _pattern("Spin-Back", 0.5, False, _speed_ramp(0.5, -1.0, -3.0, 48),
              [(0.0, 1.0, "line"), (0.1, 1.0, "line"), (0.5, 0.0, "line")]),
     _pattern("Rewind", 1.0, False, _rejoin([(0.0, 0.0, "line"), (1.0, -2.0, "line")]), _flat(1.0)),
     # gates and the break: the playhead stays at now, the volume moves
@@ -1618,6 +1621,199 @@ static_assert(sizeof kTimePatterns / sizeof kTimePatterns[0] == kNumTimePatterns
 """ % ("\n".join(lines), ",\n".join(rows), len(patterns))
 
 
+# --- the Moves: docs/DESIGN.md "Moves" ------------------------------------------------------------------
+# Sixteen one-tap actions for the MOVES page's tiles, held as data here and checked here; build/move_data.h is what
+# plugin/moves.cpp plays. A Move is a length in beats from its line on the grid, and
+#   pattern  the Time pattern it plays (by name, or None); the Move is as long as the pattern
+#   parts    the parts it switches on while it plays: "pump", "shape", "echo", "time" (the bits of MoveDef.partsOn)
+#   ramps    up to four changes of parameters on top of the knobs, each a key, a kind, a value, a shape and a window:
+#              add  a change of the knob's 0..1 value (a log parameter's travel is octaves of its range: _octaves), the
+#                   result held within 0..1; "relative to where the knobs are"
+#              set  an option held while the ramp is on (an enum parameter; the value is the option's name)
+#              shape  how an add ramp moves over its window: rise 0 to 1, hold 1, fall 1 to 0
+#              window  from and to, as fractions of the Move's length (the whole Move unless it says)
+#            Outside its window and when the Move ends a ramp glides back to the knob's value over 10 ms.
+# A Move names the parameters it moves by key and the parts it needs, and the build checks both. The tiles are in this
+# order (MOVE_NAMES, R28): append, don't reorder.
+MOVE_PARTS = ("pump", "shape", "echo", "time")      # kPartPump, kPartShape, kPartEcho, kPartTime
+MOVE_PART_SWITCH = {"pump": "pump_on", "shape": "shape_on", "echo": "echo_on", "time": "time_on"}
+MOVE_KINDS = ("add", "set")                         # kMoveAdd, kMoveSet
+MOVE_SHAPES = ("rise", "hold", "fall")              # kMoveRise, kMoveHold, kMoveFall
+MOVE_MAX_RAMPS = 4
+MOVE_MAX_LENGTH = 16.0                              # beats
+MOVE_SWEEP = 2.0                                    # octaves the Filter Drop's cutoff falls over its bar
+
+
+def _add(key, amount, shape="hold", at=(0.0, 1.0)):
+    return dict(key=key, kind="add", value=float(amount), shape=shape, frm=float(at[0]), to=float(at[1]))
+
+
+def _set(key, option, at=(0.0, 1.0)):
+    return dict(key=key, kind="set", value=option, shape="hold", frm=float(at[0]), to=float(at[1]))
+
+
+def _real(key, change):
+    """A linear parameter's travel for a change of `change` in its own units (R37): echo_fb +0.3 is +0.15 of its -1..1."""
+    p = PARAMS[key]
+    return change / (p["hi"] - p["lo"])
+
+
+def _octaves(key, n):
+    """A log parameter's travel for `n` octaves up (down if negative): its 0..1 value is log(v / lo) / log(hi / lo)."""
+    return n * math.log(2.0) / math.log(PARAMS[key]["hi"] / PARAMS[key]["lo"])
+
+
+def _move(name, pattern=None, length=None, parts=(), ramps=()):
+    """A Move with a pattern is as long as it; one without says how long."""
+    if pattern is not None:
+        length = next((pt["length"] for pt in TIME_PATTERNS if pt["name"] == pattern), None)
+    return dict(name=name, pattern=pattern, length=None if length is None else float(length), parts=tuple(parts), ramps=list(ramps))
+
+
+def _throw(name, length):
+    """The Echo's send open for the whole Move and its feedback up by 0.3 (in the offset's own -1..1 units): a beat or a bar goes in and rings."""
+    return _move(name, length=length, parts=("echo",), ramps=[_add("echo_send", 1.0), _add("echo_fb", _real("echo_fb", 0.3))])
+
+
+MOVES = [
+    _throw("Throw Beat", 1.0),
+    _throw("Throw Bar", BAR),
+    # a beat goes into the Echo (the send open, the feedback up so the lines take it), then the lines are frozen for a bar
+    _move("Dub Freeze", length=BAR + 1.0, parts=("echo",),
+          ramps=[_add("echo_send", 1.0, at=(0.0, 0.2)), _add("echo_fb", _real("echo_fb", 0.3), at=(0.0, 0.2)), _set("echo_freeze", "On", at=(0.2, 1.0))]),
+    _move("Half-Time Bar", pattern="Half-Time Bar", parts=("time",)),
+    _move("Tape Stop", pattern="Tape Stop", parts=("time",)),
+    _move("Slow Down", pattern="Slow Down", parts=("time",)),
+    _move("Reverse Beat", pattern="Reverse Beat", parts=("time",)),
+    _move("Spin-Back", pattern="Spin-Back", parts=("time",)),
+    _move("Stutter 1/8", pattern="Stutter 1/8", parts=("time",)),
+    _move("Stutter 1/16", pattern="Stutter 1/16", parts=("time",)),
+    _move("Roll Build 1 Bar", pattern="Roll Build 1 Bar", parts=("time",)),
+    _move("Roll Build 4 Bars", pattern="Roll Build 4 Bars", parts=("time",)),
+    # the Shape's filter lane on, its cutoff falling two octaves over the bar (at the filter's own type and resonance)
+    _move("Filter Drop", length=BAR, parts=("shape",),
+          ramps=[_set("flt_on", "On"), _add("flt_cutoff", _octaves("flt_cutoff", -MOVE_SWEEP), "rise")]),
+    _move("Gate 1/16", pattern="Gate 1/16", parts=("time",)),
+    # the dry drops out for the bar; the first beat of it goes into the Echo, which rings on
+    _move("Break", length=BAR, parts=("echo",), ramps=[_add("dry", -1.0), _add("echo_send", 1.0, at=(0.0, 0.25))]),
+    _move("Rewind", pattern="Rewind", parts=("time",)),
+]
+
+
+def _part_of(key):
+    """The part a parameter belongs to (None: the chain's own, the dry level and the mix among them)."""
+    if key.startswith("pump_"):
+        return "pump"
+    if key.startswith(("shape_", "vol_", "flt_", "pan_")):
+        return "shape"
+    if key.startswith("echo_") or key[:2] in ("a_", "b_", "c_", "d_"):
+        return "echo"
+    if key.startswith("time_"):
+        return "time"
+    return None
+
+
+def check_moves(moves, patterns):
+    """A wrong entry fails the build, not the device. One Move per MOVE_NAMES entry, in its order. Each: a length in
+    (0, MOVE_MAX_LENGTH] beats; a Time pattern that exists and is as long as the Move (and the "time" part with it, and
+    only then); parts from MOVE_PARTS; a pattern or a ramp; at most MOVE_MAX_RAMPS ramps. Each ramp names a sound
+    parameter (not a part's switch: the Move's parts do that) of a part the Move switches on or of none; an add ramp a
+    number parameter and an amount in -1..1, a set ramp an enum parameter and one of its options; a known shape and a
+    window 0 <= from < to <= 1."""
+    errors = []
+    if [mv["name"] for mv in moves] != MOVE_NAMES:
+        errors.append("the Moves are %s, the tiles %s" % ([mv["name"] for mv in moves], MOVE_NAMES))
+    lengths = {pt["name"]: pt["length"] for pt in patterns}
+    switches = set(MOVE_PART_SWITCH.values())
+    for mv in moves:
+        where = "%r" % mv["name"]
+        length, pattern = mv["length"], mv["pattern"]
+        if pattern is not None and pattern not in lengths:
+            errors.append("%s: no Time pattern named %r" % (where, pattern))
+        elif pattern is not None and length is not None and abs(lengths[pattern] - length) > 1e-9:
+            errors.append("%s: the Move is %g beats and its pattern %g" % (where, length, lengths[pattern]))
+        if length is None or not 0 < length <= MOVE_MAX_LENGTH:
+            errors.append("%s: the length %s is outside (0, %g] beats" % (where, length, MOVE_MAX_LENGTH))
+        if pattern is None and not mv["ramps"]:
+            errors.append("%s: neither a pattern nor a ramp" % where)
+        if (pattern is None) == ("time" in mv["parts"]):
+            errors.append("%s: the \"time\" part and a Time pattern go together" % where)
+        for part in mv["parts"]:
+            if part not in MOVE_PARTS:
+                errors.append("%s: no part %r (%s)" % (where, part, ", ".join(MOVE_PARTS)))
+        if len(set(mv["parts"])) != len(mv["parts"]):
+            errors.append("%s: a part twice" % where)
+        if len(mv["ramps"]) > MOVE_MAX_RAMPS:
+            errors.append("%s: %d ramps, at most %d" % (where, len(mv["ramps"]), MOVE_MAX_RAMPS))
+        for r in mv["ramps"]:
+            key = r["key"]
+            there = "%s: the ramp on %r" % (where, key)
+            p = PARAMS.get(key)
+            if p is None or p["kind"] != "synth":
+                errors.append("%s is not a sound parameter" % there)
+                continue
+            if key in switches:
+                errors.append("%s is a part's switch: name the part instead" % there)
+            if _part_of(key) not in (None,) + tuple(mv["parts"]):
+                errors.append("%s belongs to the %s, which the Move does not switch on" % (there, _part_of(key)))
+            if r["kind"] not in MOVE_KINDS:
+                errors.append("%s: kind %r is none of %s" % (there, r["kind"], ", ".join(MOVE_KINDS)))
+            elif r["kind"] == "add":
+                if p["curve"] == "enum" or not isinstance(r["value"], float) or not -1.0 <= r["value"] <= 1.0:
+                    errors.append("%s: an add needs a number parameter and an amount in -1..1" % there)
+            elif p["curve"] != "enum" or r["value"] not in p.get("options", []):
+                errors.append("%s: a set needs an enum parameter and one of its options, not %r" % (there, r["value"]))
+            if r["shape"] not in MOVE_SHAPES:
+                errors.append("%s: shape %r is none of %s" % (there, r["shape"], ", ".join(MOVE_SHAPES)))
+            if not 0.0 <= r["frm"] < r["to"] <= 1.0:
+                errors.append("%s: the window %s..%s is not within 0..1" % (there, r["frm"], r["to"]))
+    if len(moves) != MOVE_TILES:
+        errors.append("%d Moves, the MOVES page has %d tiles" % (len(moves), MOVE_TILES))
+    if errors:
+        raise SystemExit("moves:\n  " + "\n  ".join(errors))
+
+
+def move_data_header(moves, patterns):
+    """build/move_data.h: every Move's ramps in one array, and a row per Move saying where they are. A set ramp's amount
+    is its option's 0..1 value (index / (options - 1), as MPC stores an enum)."""
+    rows, ramps, total = [], [], 0
+    index = {pt["name"]: i for i, pt in enumerate(patterns)}
+    for mv in moves:
+        ramps.append("    // %s" % mv["name"])
+        for r in mv["ramps"]:
+            p = PARAMS[r["key"]]
+            amount = r["value"] if r["kind"] == "add" else p["options"].index(r["value"]) / float(len(p["options"]) - 1)
+            ramps.append("    {P_%s, kMove%s, %sf, kMove%s, %sf, %sf}," % (
+                r["key"].upper(), r["kind"].capitalize(), repr(float(amount)), r["shape"].capitalize(), repr(r["frm"]), repr(r["to"])))
+        parts = " | ".join("kPart%s" % q.capitalize() for q in MOVE_PARTS if q in mv["parts"]) or "0"
+        rows.append("    {%s, %d, %sf, %d, %d, %s}" % (
+            c_str(mv["name"]), -1 if mv["pattern"] is None else index[mv["pattern"]], repr(mv["length"]), total, len(mv["ramps"]), parts))
+        total += len(mv["ramps"])
+    return """// generated by surface/surface.py from MOVES: do not edit
+#pragma once
+#include "../../plugin/moves.h"
+#include "param_ids.h"
+
+namespace gf {
+
+// Every Move's ramps, in Move order: parameter, kind, amount, shape, and the window as fractions of the Move's length.
+inline constexpr MoveRamp kMoveRamps[] = {
+%s
+};
+
+// name, Time pattern (an index into kTimePatterns, -1: none), length in beats, ramps (first, count), parts switched on.
+inline constexpr MoveDef kMoves[] = {
+%s
+};
+inline constexpr int kNumMoves = %d;
+inline constexpr int kNumMoveRamps = %d;
+static_assert(sizeof kMoves / sizeof kMoves[0] == kNumMoves, "a row per Move");
+static_assert(sizeof kMoveRamps / sizeof kMoveRamps[0] == kNumMoveRamps, "a row per ramp");
+
+} // namespace gf
+""" % ("\n".join(ramps), ",\n".join(rows), len(moves), total)
+
+
 def check_lock(keys):
     """params.lock: the parameter keys in index order, one per line, the file sd88me's gen_vst.py writes since
     2026-10-21 (their #488), so a later copy of it reads ours as its own. MPC projects, automation lanes and Q-Link
@@ -1652,6 +1848,7 @@ def main():
     presets = factory_presets()   # everything checked before anything is written
     check_shapes(SHAPES)
     check_time_patterns(TIME_PATTERNS)
+    check_moves(MOVES, TIME_PATTERNS)
     outputs = [
         ("params.json", json.dumps(params_json(), indent=1)),
         ("layout.conf", layout),
@@ -1660,6 +1857,7 @@ def main():
         (os.path.join("build", "factory_presets.h"), presets_header(presets)),
         (os.path.join("build", "shape_data.h"), shape_data_header(SHAPES)),
         (os.path.join("build", "time_data.h"), time_data_header(TIME_PATTERNS)),
+        (os.path.join("build", "move_data.h"), move_data_header(MOVES, TIME_PATTERNS)),
         (os.path.join("build", "param_ids.h"), header()),   # last: make's target, newer than the rest
     ]
     if lock:
@@ -1670,8 +1868,8 @@ def main():
         with open(path + ".tmp", "w", newline="\n", encoding="utf-8") as f:
             f.write(text)
         os.replace(path + ".tmp", path)
-    print("surface: %d parameters, layout ok, %d factory presets, %d shapes, %d time patterns"
-          % (len(P), len(presets), len(SHAPES), len(TIME_PATTERNS)))
+    print("surface: %d parameters, layout ok, %d factory presets, %d shapes, %d time patterns, %d moves"
+          % (len(P), len(presets), len(SHAPES), len(TIME_PATTERNS), len(MOVES)))
 
 
 if __name__ == "__main__":

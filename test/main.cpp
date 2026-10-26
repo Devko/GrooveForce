@@ -18,6 +18,7 @@ void pumpTests();
 void shapeTests();
 void grooveTests();
 void echoModTests();
+void movesTests();
 void pluginTests();
 void echoLineTests();
 
@@ -33,6 +34,7 @@ int main() {
     shapeTests();
     grooveTests();
     echoModTests();
+    movesTests();
     pluginTests();
     echoLineTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);

@@ -34,7 +34,7 @@ MV       := third_party/mpc-vst-plugins
 SURF     := surface
 SURF_OUT := $(SURF)/build
 SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveForce
-GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h $(SURF_OUT)/time_data.h
+GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h $(SURF_OUT)/time_data.h $(SURF_OUT)/move_data.h
 SKIN     := $(SURF_OUT)/skin.stamp
 
 SRC      := $(wildcard dsp/*.cpp) $(wildcard plugin/*.cpp)
@@ -119,6 +119,8 @@ MOD_DEPS_shape := dsp/shapes.cpp dsp/pump_curves.cpp
 MOD_DEPS_pump := dsp/pump_curves.cpp
 MOD_DEPS_groove := dsp/pump.cpp dsp/shape.cpp dsp/shapes.cpp dsp/pump_curves.cpp
 MOD_DEPS_echo_mod := dsp/shapes.cpp dsp/pump_curves.cpp
+# Moves play Time patterns (the suite drives dsp/time.cpp from them) and name them from the generated tables.
+MOD_DEPS_moves := plugin/moves.cpp dsp/time.cpp
 MOD_SRC = test/module_main.cpp test/$(M)_test.cpp $(wildcard dsp/$(M).cpp) $(MOD_DEPS_$(M))
 test-module: $(GEN) | $(BUILD)
 	@[ -n "$(M)" ] || { echo "usage: make test-module M=<module>"; exit 1; }
