@@ -160,7 +160,7 @@ void shapesPumps() {      // a Pump shape is 0 at phase 0 and recovers by pumpLe
     }
 }
 
-void shapesWrap() {       // Points and Pump: continuous across the wrap unless the last segment is Hold
+void shapesWrap() {       // the wrap: Points are continuous unless the last segment is Hold; Pump shapes fall from 1 to 0
     for (int s = 0; s < gf::numShapes(); ++s) {
         const gf::ShapeDef& d = gf::kShapes[s];
         if (d.kind == gf::ShapeKind::Points) {

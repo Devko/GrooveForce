@@ -1,6 +1,7 @@
-// The pump curves (dsp/pump_curves.h): what every curve family has to satisfy, whichever shapes
-// the ten named curves take, and that the names mean something. The curves themselves are the
-// user's (dsp/pump_curves.cpp); these are the only hard rules.
+// The pump curves (dsp/pump_curves.h): the rules any curve family must pass, whichever shapes the
+// ten named curves take, and that the names mean something. The curves themselves are in
+// dsp/pump_curves.cpp and are tuned by ear on the Force; these are the only hard rules, and what a
+// retuned curve has to keep.
 #include "check.h"
 #include "../dsp/pump_curves.h"
 

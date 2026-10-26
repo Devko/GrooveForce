@@ -200,7 +200,7 @@ endif
 # PGO_ON: make reads ifeq when it reads the line, so above its definition it was always the plain branch.
 test-arm-pgo: $(ARM_SO)
 ifeq ($(PGO_ON),1)
-	$(ARM_CXX) -std=c++17 $(ARM_OPT) -Wno-psabi -pthread -DGF_PGO_OBJECTS=1 $(INC) $(TESTS) $(PGO_OBJ)/*.o -o $(BUILD)/arm/gf_test_pgo
+	$(ARM_CXX) -std=c++17 $(ARM_OPT) -Wno-psabi -pthread $(INC) $(TESTS) $(PGO_OBJ)/*.o -o $(BUILD)/arm/gf_test_pgo
 	$(ARM_RUN) $(BUILD)/arm/gf_test_pgo
 else
 	@echo "test-arm-pgo: the .so is a plain build here (PGO=$(PGO)); test-arm covers it"

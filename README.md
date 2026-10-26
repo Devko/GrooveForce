@@ -20,7 +20,7 @@ a showpiece.
 |---|---|
 | Pump | A Kickstart-style duck on MPC's grid, with no sidechain: 1/16 to 1 bar, ten named recoveries (Smooth, Punch, Hard, Long, Late...), depth, length, and a push from 10 ms early to 30 ms late. The duck follows the grid, or fires on the input's own transients (Input). It can act on the lows or the highs only, split at 60-300 Hz |
 | Shape | Three lanes, Volume, Filter and Pan, each running a named shape (38 of them: waves, the Pump's curves, 16-step patterns, random) at a rate from 1/16 to 4 bars, with its own depth and phase. The filter lane moves a low-pass, band-pass or high-pass, with cutoff and resonance |
-| Swing | 50-75% on 1/16 or 1/8, applied once along the path, so a swung pump and a swung accent land on the same late 16ths |
+| Swing | 50-75% on 1/16 or 1/8, applied once along the path, so a swung pump and a swung accent land on the same late 16ths. In this preview it moves the Shape's and the Pump's steps to match audio that MPC's own note swing has already swung (set it to MPC's swing amount); it doesn't swing the audio, which comes with the Time part, and on a straight loop it puts accents off the hits |
 | Presets | Factory presets sorted by job, a browser with favorites and recents, user presets saved from the screen |
 
 Whatever is on, it stays on MPC's song position through loops, locates and tempo changes (stopped, the

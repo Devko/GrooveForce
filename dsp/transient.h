@@ -23,23 +23,27 @@
 // Sensitivity sets how far over the slow envelope the quick one has to rise: a ratio from 4 (0, only
 // hits that stand out) to 1.4 (1, quiet hits too), in equal steps of log.
 //
-// Limits (measured in test/transient_test.cpp):
+// Limits (measured: test/transient_test.cpp asserts the roll at 0.8 and the bass bed at -12 dB and
+// prints the rumble counts; the other figures come from probes):
 //  - A roll of 1/16 kicks needs a keener sensitivity than the default 0.5, about 0.8: the slow
 //    envelope still holds the kick before, 100 to 125 ms back. All 8 kicks of a roll are found from
-//    0.6 at 120 BPM, 0.7 at 128 and 140 BPM, 0.8 at 150 BPM.
+//    0.6 at 120 BPM, 0.7 at 128 and 140 BPM, 0.8 at 150 BPM. The keener setting trades away noise
+//    immunity (below).
+//  - Steady white and Gaussian noise are clean at the default 0.5. At the roll's 0.8, steady
+//    Gaussian noise fires (some 6 onsets a second, a few in 10 s at 0.7); uniform white noise stays
+//    clean.
 //  - Rumble-like material can fire it now and then at 0.5: low-passed noise (10 s of it at 300 Hz
-//    gives some 20 onsets, at 120 Hz some 3 to 12) and the rumble of a kick's own tail; kicks over
-//    such a bed are mostly found, but an extra onset, and the kick it shadows, turn up on a few beats.
-//    White and Gaussian noise are clean. The Input trigger is for drum buses; a
-//    kick with rumble wants the Pump's Grid trigger.
+//    gives some 20 onsets, at 120 Hz some 3 to 12); kicks over such a bed are mostly found, but an
+//    extra onset, and the kick it shadows, turn up on a few beats. The Input trigger is for drum
+//    buses; a kick with rumble wants the Pump's Grid trigger.
 //  - A hit has to stand out roughly 9-12 dB over what is sustained under it. A kick over a 40 Hz
 //    bass 12 dB under the kick's peak is found every time at the default sensitivity; at 9 dB every
 //    other one, at 6 dB one in four, at 3 dB none. Same remedy: the Grid trigger.
 //
 // No look-ahead: the onset is the sample at which the quick envelope crosses, found as the audio
 // goes by. A kick over noise 30 dB under it is found 0.4 to 0.5 ms after it starts (the first rise
-// out of the noise); one behind another in a roll, or over a bass, 0.8 to 3 ms in, the sound
-// before it hiding its start.
+// out of the noise); one behind another in a roll, or over a bass, about 1.0 to 3.0 ms in, the
+// sound before it hiding its start.
 #include "common.h"   // sanitize, smoothCoef, kRate; simd.h for NEON
 
 #include <cfloat>

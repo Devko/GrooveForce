@@ -49,8 +49,8 @@ carries; if it spreads them, each copy costs its share.
 
 ## Device measurements
 
-**Not measured yet.** The numbers come from the Force in the plan's last task (Task 14). Until then
-the table is the bench's shape and the targets above.
+**Not measured yet.** The numbers come from `make bench-device` on the Force and are still to be
+measured. Until then the table is the bench's shape and the targets above.
 
 | Case | avg | p99 | max | Design target (p99) |
 |---|---|---|---|---|
@@ -59,10 +59,6 @@ the table is the bench's shape and the targets above.
 | Shape heaviest | to measure | to measure | to measure | ≤ 1.6 (1 and the plugin) |
 | **Both heaviest**, swing 75% | to measure | to measure | to measure | **≤ 2.4** |
 | Four instances (sum) | to measure | to measure | to measure | about 4 × 2.4 |
-
-The Pump and Shape cases measure their real cost once the chain is wired into the plugin; before that
-the engine plays only the three levels, and the bench measures the plugin's own work whatever it is
-told to switch on.
 
 ## Instruction counts
 
@@ -96,6 +92,8 @@ that stall), which the device's p99 over its average shows. Not counted yet.
 - **The profile-guided build:** `make arm-plugin` trains on the reference mix (`tools/pgo_train.cpp`:
   every option of every choice, the heaviest case, every factory preset) so the compiler knows which
   paths are hot. Release builds are profile-guided in CI too.
-- **Cheap getters:** MPC polls names and texts hundreds of times a second; they read caches, lock-free.
+- **Cheap getters:** MPC polls names and texts hundreds of times a second; they read atomics and
+  caches. Only `Surface::display` takes a lock (`mtx_`), and only for the tile, stepper and readout
+  texts: MPC's UI thread asks for those, and the audio thread never takes it.
 - **At most one redraw per 50 ms:** the status line's CPU figure changes now and then; MPC rebuilds its
   parameter screen on each redraw, so the plugin asks for at most one every 50 ms.

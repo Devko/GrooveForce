@@ -14,7 +14,10 @@ The groundwork and the first two parts, **Pump** and **Shape**: a preview, not p
 - **Shape:** three lanes (Volume, Filter, Pan), each running one of 38 named shapes (waves, the Pump's
   curves, 16-step patterns, random) at a rate from 1/16 to 4 bars, with its own depth and phase; the
   filter lane moves a low-pass, band-pass or high-pass with cutoff and resonance.
-- **Swing:** 50-75% on 1/16 or 1/8, applied once along the path.
+- **Swing:** 50-75% on 1/16 or 1/8, applied once along the path. In this preview it moves the Shape's
+  and the Pump's steps to match audio that MPC's own note swing has already swung (set it to MPC's
+  swing amount); it doesn't swing the audio (that comes with the Time part), and on a straight loop it
+  puts accents off the hits.
 - **The plugin:** zero latency, on MPC's song position through loops, locates and tempo changes,
   no gain edge faster than 1 ms, and Init passes the input through bit for bit. Pages GROOVE and
   PRESETS, PUMP and SHAPE, SETUP; factory presets, favorites, recents and user presets.

@@ -23,15 +23,17 @@
 // chunk's start and end, on the song position the tempo reaches then, and the shape goes in a straight
 // line between the two values (no per-sample evaluation). Each sample the lane's value moves toward that
 // line by at most a full scale per millisecond: a gate's edge, a Pump shape's fall at its wrap, a locate's
-// step are all 1 ms ramps, never faster, on every lane, the filter's too (a gate on the cutoff cannot move
-// it four octaves inside a chunk). The middle of an edge lands within half a millisecond of its place on
-// the grid. (The filter lane runs the same limiter over the chunk in set(), and its cutoff glides to where
-// the value is at the chunk's end.) The rule is for the gains: Volume's gain moves at most d times a full
-// scale per millisecond. The pan law steepens the value by up to sqrt2 pi/2 = 2.22 (a side's gain
-// moves sqrt2 over a sweep from one side to the other), so the Pan lane's value is limited that much
-// harder, and a full sweep takes 2.2 ms: its gains stay within the 1 ms rule too. Only while depth,
-// amount, mix or a lane's on/off fade (10 ms) move at the same time can a gain's step pass it, by at most
-// 0.11 of the rule.
+// step are all 1 ms ramps, never faster, on the Volume and Filter lanes (a gate on the cutoff cannot move
+// it four octaves inside a chunk), and the middle of such an edge lands within half a millisecond of its
+// place on the grid. (The filter lane runs the same limiter over the chunk in set(), and its cutoff glides
+// to where the value is at the chunk's end.) The rule is for the gains: Volume's gain moves at most d times
+// a full scale per millisecond. The pan law steepens the value by up to sqrt2 pi/2 = 2.22 (a side's gain
+// moves sqrt2 over a sweep from one side to the other), so the Pan lane's value is limited 2.22 times
+// slower: a full sweep takes about 2.2 ms and the middle of its edge lands about 1.1 ms late. That is the
+// price of keeping its gains within the 1 ms rule too. Only while a control fades (10 ms: depth, amount,
+// mix or a lane's on/off) can a gain's step pass the rule, by at most 0.11 of it for each control that is
+// moving. Volume's depth, amount and mix make one product, but the Pan's depth and mix are two, and
+// together they can reach about 1.21 times the rule.
 //
 // What the controls change goes through slopes too: depth, amount, mix, a lane switched on or off
 // (a fade of 10 ms), the resonance, the filter type (a blend of LP, BP and HP weights) and the cutoff
