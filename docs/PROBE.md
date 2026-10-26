@@ -3,8 +3,11 @@
 Before GrooveForce is built on what MPC does with an insert, the **GrooveForce Probe** finds out
 three things the [design](DESIGN.md#open) leaves open. It is EffectForce's probe (a small tempo
 delay that logs every call MPC makes) with MIDI switched on and two controls added: a button and a
-tile. It builds on its own in `probe/`. Nothing later in plan 1 waits for the results; plan 3
-(Time and Moves) does.
+tile. It builds on its own in `probe/`. Plan 2 built Time and the Moves without waiting for the
+results (2026-10-26): Moves are One Shot and Loop, played from the tiles, GO, the Q-Links and the
+automatable Move parameter, and the plugin tells MPC it takes no MIDI. What still waits for these
+answers is Hold, MIDI-triggered Moves and Pump, and whether recorded automation plays back into an
+insert. The results table at the end is still to be filled in on the Force.
 
 - [What it answers](#what-it-answers)
 - [What the siblings already know](#what-the-siblings-already-know)
