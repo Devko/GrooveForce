@@ -1,0 +1,23 @@
+grooveforce 1
+pump_on=On
+pump_depth=0.5
+pump_length=0.7
+pump_target=Echo
+echo_on=On
+echo_send=0
+a_on=On
+a_pan=-0.3
+a_fb=0.6
+a_ftype=BP
+a_cut=1200
+a_drive=0.2
+a_wow=0.2
+b_on=On
+b_pan=0.3
+b_fb=0.55
+b_ftype=BP
+b_cut=1000
+b_drive=0.2
+b_wow=0.2
+time_on=On
+move=Throw Beat

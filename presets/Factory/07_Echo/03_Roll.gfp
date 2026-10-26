@@ -1,0 +1,9 @@
+grooveforce 1
+echo_on=On
+echo_duck=0.3
+a_on=On
+a_level=0.7
+a_div=1/16
+a_fb=0.6
+a_ftype=BP
+a_cut=1800

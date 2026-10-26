@@ -3,3 +3,4 @@ pump_on=On
 pump_curve=Hard
 pump_depth=1
 pump_length=0.45
+output=3.6

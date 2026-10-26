@@ -1,0 +1,21 @@
+grooveforce 1
+pump_on=On
+pump_depth=0.5
+pump_length=0.7
+pump_target=Echo
+echo_on=On
+echo_send=0
+a_on=On
+a_div=1/4
+a_fb=0.6
+a_cut=2500
+a_wow=0.2
+b_on=On
+b_level=0.6
+b_div=1/8.
+b_fb=0.55
+b_mode=Ping-Pong
+b_cut=3000
+time_on=On
+move=Break
+move_quant=Bar

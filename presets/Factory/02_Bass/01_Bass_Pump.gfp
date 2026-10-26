@@ -1,6 +1,4 @@
 grooveforce 1
 pump_on=On
-pump_rate=1/4
-pump_curve=Smooth
 pump_depth=0.8
-pump_length=0.6
+output=4.8

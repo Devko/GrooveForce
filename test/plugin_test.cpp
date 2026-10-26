@@ -4,7 +4,8 @@
 // by `make test`, for the Force's CPU under qemu by `make test-arm`.
 //
 // What is tested here is the glue and the chain behind it: the parameters, their texts and their map onto
-// the chain (grooveParams), the presets and the project state, the redraws and the status line, the Pump on
+// the chain (grooveParams), the presets (the factory set part by part, its Moves and its levels: factoryPresets,
+// factoryLevels) and the project state, the redraws and the status line, the Pump on
 // MPC's grid (pumpThroughMpc), suspend and resume with the Pump running, and that nothing hostile gets out
 // of the whole thing at once (stressEverything). The Echo, Time and the Moves through the plugin (mappingEcho, the tiles,
 // GO and the Move parameter, the loop and the locate, the memory that arrives while it plays, two instances, a preset
@@ -15,6 +16,8 @@
 #include "../plugin/moves.h"
 #include "../plugin/presets.h"
 #include "../plugin/surface.h"
+#include "factory_presets.h"
+#include "reference_mix.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -742,21 +745,28 @@ void presetsRoundTrip() {
 }
 
 // A new instance is Init, and its preset stepper stands there: wherever Init sorts (08_Utility, last of the factory set),
-// the arrows go on from it, and the browser still opens on the first category.
+// the arrows go on from it, and the browser still opens on the first category. The first preset and the one before Init
+// are the listing's, whatever the factory set holds.
 void freshInstance() {
     std::printf("== a new instance: on Init\n");
     freshUserPresets();
+    presetLibrary().rescan();   // the folders as they are now (no user presets)
+    const auto lst = presetLibrary().listing();
+    const int initAt = lst->find("builtin:Init");
+    CHECK(initAt >= 1 && lst->items[static_cast<size_t>(std::max(initAt, 1) - 1)].builtin >= 0);
+    const Entry& first = lst->items.front();
+    const Entry& before = lst->items[static_cast<size_t>(std::max(initAt, 1) - 1)];
     Host init;
     init.press(P_PRE_INIT);
     Host h;
     CHECK(h.display(P_PRESET) == "PRESET  Utility / Init" && allDefaults(h));
     CHECK(h.get(P_PRESET) > 0.0f && h.get(P_PRESET) == init.get(P_PRESET));   // the stepper's value stands on it too
     CHECK(has(h.chunk(), "\npreset=builtin:Init\n"));
-    CHECK(h.display(P_ITEM_1) == "Bass Pump");
+    CHECK(h.display(P_ITEM_1) == first.name);   // the first category's first preset
     h.press(P_PRESET_NEXT);   // no user presets: the end of the list, nothing to load
     CHECK(h.display(P_PRESET) == "PRESET  Utility / Init");
     h.press(P_PRESET_PREV);   // one back is the factory preset before Init
-    CHECK(h.display(P_PRESET) == "PRESET  Drum Bus / Low Pump" && !allDefaults(h));
+    CHECK(h.display(P_PRESET) == "PRESET  " + before.category + " / " + before.name && !allDefaults(h));
     h.press(P_PRESET_NEXT);
     CHECK(h.display(P_PRESET) == "PRESET  Utility / Init" && allDefaults(h));
     Host saver;   // with a user preset in the list, one arrow forward from a new instance is that preset
@@ -855,17 +865,58 @@ bool landed(Host& h, const std::string& text) {
     return ok;
 }
 
-// Every factory preset, loaded by the browser's arrows on a fresh instance: it is what its file says, and on the beat at
-// 120 BPM with the transport running it stays a number under +18 dBFS and changes the sound (the rms of the difference
-// to the input above -40 dB re the input). Init is the one that doesn't: the input, bit for bit.
+// How far apart two outputs are: the rms of their difference against the rms of the input, both channels, from `from`
+// on, in dB.
+double apartDb(const Buf& aL, const Buf& aR, const Buf& bL, const Buf& bR, const Buf& inL, const Buf& inR, size_t from = 0) {
+    double diff = 0.0, sig = 0.0;
+    for (size_t i = from; i < inL.size(); ++i) {
+        const double x = static_cast<double>(aL[i]) - bL[i], y = static_cast<double>(aR[i]) - bR[i];
+        diff += x * x + y * y;
+        sig += static_cast<double>(inL[i]) * inL[i] + static_cast<double>(inR[i]) * inR[i];
+    }
+    return db(std::sqrt(diff / std::max(sig, 1e-30)));
+}
+
+// Every factory preset, loaded by the browser's arrows on a fresh instance: it is what its file says, a project names it
+// and loads it back, and on the beat at 120 BPM with the transport running it stays a number under +18 dBFS and does
+// what it is for. Init is the one that doesn't: the input, bit for bit.
+//
+// What a preset does is checked part by part: every part it switches on changes the beat by more than -40 dB (the rms
+// of the difference re the input's) against the same preset with that part's work taken down to a hair, its switch and
+// everything else as they are. A hair is the Pump's depth at 1% (a banded Pump's split stays in, so Low Pump shows its
+// duck and not its crossover's phase), Shape's depth at 1% (a lane's static filter stays), the Echo's level at 1% (its
+// wet) and Time's groove Off (Time then only records). Some parts are there for the Moves alone and do nothing at rest:
+// an Echo whose send is closed (a Throw opens it) with a Pump or Shape aimed at it, and Time with no groove (the Moves
+// play from its ring). A preset that selects a Move plays it from GO at the second bar, and the Move changes that bar by
+// more than -40 dB; one without a Move changes the beat at rest.
 void factoryPresets() {
     std::printf("== the factory presets\n");
     freshUserPresets();
-    // The first set, by category folder (presets/Factory/NN_Category): later ones are checked by the loop below too.
-    static const struct { const char* category; const char* name; } kFirst[] = {
-        {"Bass", "Bass Pump"},          {"Bass", "Hard Pump"},         {"Bass", "Double Pump"},      {"Bass", "Offbeat Gate"},
-        {"Hats + Perc", "Hat Accents"}, {"Hats + Perc", "Hat Shuffle"}, {"Chords", "Chord Gate Pump"}, {"Chords", "Filter Pump"},
-        {"Drum Bus", "Low Pump"},       {"Utility", "Init"}};
+    // The plan's set by job (docs/plans/2026-10-26-echo-time-presets.md, Task 13), by category folder
+    // (presets/Factory/NN_Category): every one is there, in its category. The loop below checks whatever the set holds.
+    static const struct { const char* category; const char* name; } kPlanned[] = {
+        {"Kick", "Rumble"},              {"Kick", "Rumble Deep"},          {"Kick", "Rumble Short"},
+        {"Bass", "Bass Pump"},           {"Bass", "Hard Pump"},            {"Bass", "Double Pump"},
+        {"Bass", "Offbeat Gate"},        {"Bass", "Rolling Bass"},         {"Bass", "Rolling Dark"},
+        {"Bass", "Rolling 3/16"},        {"Hats + Perc", "Hat Accents"},   {"Hats + Perc", "Hat Shuffle"},
+        {"Hats + Perc", "Polyrhythm"},   {"Hats + Perc", "Poly 5/16"},     {"Hats + Perc", "Ping-Pong Hats"},
+        {"Hats + Perc", "Hat Swing 58"}, {"Hats + Perc", "Hat Swing 66"},  {"Hats + Perc", "Drunk Hats"},
+        {"Hats + Perc", "Rim Echo"},     {"Chords", "Chord Gate Pump"},    {"Chords", "Filter Pump"},
+        {"Chords", "Dub Chord"},         {"Chords", "Dub Chord Wide"},     {"Chords", "Dub Chord Drive"},
+        {"Chords", "Stab Throw"},        {"Drum Bus", "Low Pump"},         {"Drum Bus", "Loop Groove"},
+        {"Drum Bus", "Bus Swing"},       {"Drum Bus", "Fill Roller"},      {"Perform", "Breakdown"},
+        {"Perform", "Build"},            {"Perform", "Throws"},            {"Perform", "Glitch"},
+        {"Echo", "Rumble Echo"},         {"Echo", "Dub"},                  {"Echo", "Roll"},
+        {"Echo", "Polyrhythm Echo"},     {"Echo", "Ping-Pong"},            {"Echo", "Tape"},
+        {"Echo", "Slap"},                {"Echo", "Spread Cloud"},         {"Echo", "Freeze"},
+        {"Utility", "Init"}};
+    struct Hair {
+        int on, param;
+        float value;
+        const char* what;
+    };
+    static const Hair kHairs[] = {{P_PUMP_ON, P_PUMP_DEPTH, 0.01f, "Pump"}, {P_SHAPE_ON, P_SHAPE_DEPTH, 0.01f, "Shape"},
+                                  {P_ECHO_ON, P_ECHO_LEVEL, 0.01f, "Echo"}, {P_TIME_ON, P_TIME_GROOVE, 0.0f, "Time"}};
     std::vector<int> factory;   // the listing's built-ins, in the order the arrows walk them
     int items = 0;
     {
@@ -874,13 +925,14 @@ void factoryPresets() {
         items = static_cast<int>(lst->items.size());
         for (int i = 0; i < items; ++i)
             if (lst->items[static_cast<size_t>(i)].builtin >= 0) factory.push_back(i);
-        for (const auto& want : kFirst) {
+        for (const auto& want : kPlanned) {
             const int at = lst->find(std::string("builtin:") + want.name);
             CHECK(at >= 0 && lst->items[static_cast<size_t>(std::max(at, 0))].category == want.category);
         }
     }
     Buf l, r;
     beat(l, r);
+    const size_t bar2 = l.size() / 2 / kBlock * kBlock;   // the last block boundary before the second bar: GO goes there
     for (size_t k = 0; k < factory.size(); ++k) {
         Host h;
         const auto lst = presetLibrary().listing();
@@ -889,19 +941,97 @@ void factoryPresets() {
         h.press(P_PRE_INIT);
         for (int i = 0; i < items; ++i) h.press(P_PRESET_PREV);
         for (size_t i = 0; i < k; ++i) h.press(P_PRESET_NEXT);
-        CHECK(h.display(P_PRESET) == "PRESET  " + e.category + " / " + e.name);
+        const std::string shown = "PRESET  " + e.category + " / " + e.name;
+        CHECK(h.display(P_PRESET) == shown);
         std::string text;
         CHECK(presetText(e.key, text) && landed(h, text));
+        {
+            Host back;   // a project that has it names it, and loads it back by that name ("Poly 5/16" has a slash)
+            CHECK(back.load(h.chunk()) == 1 && back.display(P_PRESET) == shown);
+        }
         h.play(true);
         h.run(l, r);
         const double change = changeDb(l, r, h.L, h.R);
         const float high = std::max(peak(h.L), peak(h.R));
-        std::printf("  %-14s %-18s changes the beat by %6.1f dB, peak %5.1f dBFS\n", e.category.c_str(), e.name.c_str(), change, db(high));
+        std::printf("  %-11s %-16s changes the beat by %6.1f dB, peak %5.1f dBFS;", e.category.c_str(), e.name.c_str(), change, db(high));
         CHECK(h.finite && high <= kCeiling);
-        if (e.name == "Init") CHECK(h.L == l && h.R == r);
-        else CHECK(change > -40.0);
+        if (e.name == "Init") {
+            std::printf(" the input, bit for bit\n");
+            CHECK(h.L == l && h.R == r);
+            continue;
+        }
+        // An Echo whose send is closed is silent until a Move opens it, and so is a part aimed at it.
+        const bool closed = h.value(P_ECHO_SEND) == 0.0f;
+        auto onEcho = [&h](int target) { return std::lround(h.value(target)) == Groove::kEcho; };
+        for (const Hair& q : kHairs) {
+            if (h.value(q.on) < 0.5f) continue;
+            if (closed && (q.param == P_ECHO_LEVEL || (q.param == P_PUMP_DEPTH && onEcho(P_PUMP_TARGET)) ||
+                           (q.param == P_SHAPE_DEPTH && onEcho(P_SHAPE_TARGET))))
+                continue;   // for the Throws
+            if (q.param == P_TIME_GROOVE && h.value(P_TIME_GROOVE) == 0.0f) continue;   // for the Moves
+            Host g;
+            CHECK(g.load(text) == 1);
+            g.set(q.param, q.value);
+            g.play(true);
+            g.run(l, r);
+            const double part = apartDb(h.L, h.R, g.L, g.R, l, r);
+            std::printf(" %s %.1f", q.what, part);
+            if (part <= -40.0) std::printf(" <-- does nothing");
+            CHECK(g.finite && part > -40.0);
+        }
+        const int move = static_cast<int>(std::lround(h.value(P_MOVE))) - 1;   // -1: None
+        if (move >= 0) {
+            Host m;
+            CHECK(m.load(text) == 1);
+            m.play(true);
+            Buf moved[2];
+            m.run(Buf(l.begin(), l.begin() + static_cast<long>(bar2)), Buf(r.begin(), r.begin() + static_cast<long>(bar2)));
+            moved[0] = m.L;
+            moved[1] = m.R;
+            m.press(P_MOVE_GO);
+            m.run(Buf(l.begin() + static_cast<long>(bar2), l.end()), Buf(r.begin() + static_cast<long>(bar2), r.end()));
+            moved[0].insert(moved[0].end(), m.L.begin(), m.L.end());
+            moved[1].insert(moved[1].end(), m.R.begin(), m.R.end());
+            const double played = apartDb(moved[0], moved[1], h.L, h.R, l, r, bar2);
+            std::printf(" Move %s %.1f", PARAM_INFO[P_MOVE].opts[move + 1], played);
+            CHECK(m.finite && std::max(peak(moved[0]), peak(moved[1])) <= kCeiling && played > -40.0);
+        } else {
+            CHECK(change > -40.0);
+        }
+        std::printf("\n");
     }
-    CHECK(factory.size() >= sizeof kFirst / sizeof kFirst[0]);
+    CHECK(factory.size() >= sizeof kPlanned / sizeof kPlanned[0]);
+}
+
+// Every factory preset stays level-matched (EffectForce's testFactory): the reference material of its category
+// (tools/reference_mix.h: the kick for Kick, the bass line for Bass, the hats and the snare for Hats + Perc...) comes out
+// as loud as it went in, within 0.5 dB, as `make preset-levels` left it; a preset whose Output is at the +-9 dB cap
+// passes as near as the cap lets it and says how far short it is. It plays finite, its peaks under +6 dBFS. A change to
+// the DSP or to a preset that moves a preset's level fails here: run make preset-levels again.
+void factoryLevels() {
+    std::printf("== the factory presets are level-matched\n");
+    int bad = 0;
+    for (int i = 0; i < kNumFactoryPresets; ++i) {
+        const FactoryPreset& f = kFactoryPresets[i];
+        Buf inL, inR;
+        gfl::referenceMix(inL, inR, gfl::partsFor(f.category));
+        const double ref = gfl::lufs(inL, inR);
+        Host h;
+        std::string text;
+        CHECK(presetText(std::string("builtin:") + f.name, text) && h.load(text) == 1);
+        h.play(true);
+        h.run(inL, inR);
+        const double gain = gfl::lufs(h.L, h.R) - ref;
+        const bool capped = std::fabs(h.value(P_OUTPUT)) >= 8.95f;   // as matched as the +-9 dB cap allows
+        const float high = std::max(peak(h.L), peak(h.R));
+        const bool off = !h.finite || (std::fabs(gain) > 0.5 && !capped) || high > 2.0f;
+        if (off || (capped && std::fabs(gain) > 0.5))
+            std::printf("  %s / %s: %+.1f dB, peak %.1f dBFS%s%s\n", f.category, f.name, gain, db(high),
+                        capped ? " (Output at the cap)" : "", h.finite ? "" : ", NOT FINITE");
+        bad += off;
+    }
+    std::printf("  %d presets, %d off by more than 0.5 dB\n", kNumFactoryPresets, bad);
+    CHECK(bad == 0);
 }
 
 void projectState() {
@@ -2514,6 +2644,7 @@ void pluginTests() {
     RUN(presetsRoundTrip);
     RUN(freshInstance);
     RUN(factoryPresets);
+    RUN(factoryLevels);
     RUN(projectState);
     RUN(displayRate);
     RUN(statusLine);

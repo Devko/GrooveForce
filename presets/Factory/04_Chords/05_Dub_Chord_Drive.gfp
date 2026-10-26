@@ -1,0 +1,25 @@
+grooveforce 1
+pump_on=On
+pump_depth=0.7
+pump_target=Echo
+echo_on=On
+a_on=On
+a_level=0.6
+a_pan=-0.3
+a_fb=0.75
+a_cut=1800
+a_reso=0.4
+a_drive=0.7
+a_wow=0.15
+a_mod=Env
+a_mrate=1/2
+a_mcut=0.4
+b_on=On
+b_level=0.5
+b_pan=0.3
+b_fb=0.6
+b_cut=1500
+b_reso=0.3
+b_drive=0.6
+b_wow=0.15
+output=-1.8

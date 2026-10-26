@@ -63,6 +63,14 @@ inline double lufs(const std::vector<float>& L, const std::vector<float>& R) {
 
 enum Part : int { CHORDS = 1, BASS = 2, KICK = 4, SNARE = 8, HATS = 16, DRUMS = KICK | SNARE | HATS, ALL = CHORDS | BASS | DRUMS };
 
+// The categories partsFor() knows (surface.py's LEVEL_CATEGORIES says the same): another is judged on the whole mix,
+// which levels.cpp and surface.py warn about.
+inline bool knownCategory(const std::string& category) {
+    for (const char* c : {"Kick", "Bass", "Hats + Perc", "Chords", "Drum Bus", "Perform", "Echo", "Utility"})
+        if (category == c) return true;
+    return false;
+}
+
 // The parts a factory category is matched on: its name as the browser shows it (the folder "03_Hats_+_Perc"
 // is "Hats + Perc"). A category this doesn't know gets the whole mix, as Perform, Echo and Utility do.
 inline int partsFor(const std::string& category) {

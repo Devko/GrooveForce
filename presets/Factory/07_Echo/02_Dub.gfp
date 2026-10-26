@@ -1,0 +1,20 @@
+grooveforce 1
+echo_on=On
+echo_duck=0.3
+a_on=On
+a_pan=-0.3
+a_fb=0.7
+a_ftype=BP
+a_cut=900
+a_drive=0.25
+a_wow=0.3
+a_mod=LFO
+a_mrate=2 bars
+a_mcut=0.3
+b_on=On
+b_pan=0.3
+b_fb=0.6
+b_ftype=BP
+b_cut=1200
+b_drive=0.25
+b_wow=0.3

@@ -977,11 +977,51 @@ PRESET_EXT = ".gfp"
 STATE_EXTRA_KEYS = ("preset",)
 PRESET_NAME_MAX = 18      # an item tile on the browser page (816 px / 3 columns)
 CATEGORY_NAME_MAX = 12    # a category tile (320 px / 2 columns), shown in capitals
+OUTPUT_MAX_DB = 9.0       # a factory preset's Output: tools/levels.cpp sets it within this
+# The categories tools/reference_mix.h (partsFor) has material for: anything else is judged on the full mix.
+LEVEL_CATEGORIES = ("Kick", "Bass", "Hats + Perc", "Chords", "Drum Bus", "Perform", "Echo", "Utility")
 
 
 def _shown(entry):
-    """"02_Warm_Tape.gfp" -> "Warm Tape", "03_Loud" -> "Loud"."""
-    return re.sub(r"^\d+\s+", "", re.sub(r"\.gfp$", "", entry).replace("_", " "))
+    """"02_Warm_Tape.gfp" -> "Warm Tape", "03_Loud" -> "Loud". A name can't hold a "/" in a file name: "%2F" is one
+    ("07_Rolling_3%2F16.gfp" -> "Rolling 3/16", the Echo's division names)."""
+    return re.sub(r"^\d+\s+", "", re.sub(r"\.gfp$", "", entry).replace("_", " ")).replace("%2F", "/")
+
+
+def check_preset_sound(where, values, params):
+    """What a factory preset's lines say together, beyond each line on its own (EffectForce's rules, GrooveForce's
+    parts). A preset sets only what it changes: no line at its default, and nothing of a part, a Shape lane or an Echo
+    line it leaves off, unless the Move it selects switches that on. A selected Move needs Time on (its patterns play
+    from Time's ring, which records only once it has been on: R42; the design's rule for every factory preset with
+    Moves). The Output stays within +-OUTPUT_MAX_DB (tools/levels.cpp sets it). `values` maps keys to the lines'
+    values, options by name. Returns the errors."""
+    errors = []
+    on = {k for k, v in values.items() if k.endswith("_on") and v == "On"}
+    move = values.get("move", "None")
+    mv = next((m for m in MOVES if m["name"] == move), None)
+    if mv:
+        on |= {MOVE_PART_SWITCH[q] for q in mv["parts"]}
+        on |= {r["key"] for r in mv["ramps"] if r["kind"] == "set" and r["key"].endswith("_on") and r["value"] == "On"}
+        if values.get("time_on") != "On":
+            errors.append("%s: selects the Move %s but leaves Time off (a Move plays from Time's ring)" % (where, move))
+    names = {"pump": "the Pump", "shape": "Shape", "echo": "the Echo", "time": "Time"}
+    for key, val in values.items():
+        p = params[key]
+        default = p["options"][p["default"]] if "options" in p else p["default"]
+        if val == default or ("options" not in p and abs(float(val) - p["default"]) < 1e-9):
+            errors.append("%s: %s=%s is its default (a preset sets only what it changes)" % (where, key, val))
+        if key == "output" and abs(float(val)) > OUTPUT_MAX_DB + 1e-9:
+            errors.append("%s: output=%s: a factory preset's Output stays within +-%g dB (tools/levels.cpp)"
+                          % (where, val, OUTPUT_MAX_DB))
+        if key.endswith("_on"):
+            continue
+        part = _part_of(key)
+        if part and MOVE_PART_SWITCH[part] not in on:
+            errors.append("%s: sets %s but leaves %s off" % (where, key, names[part]))
+        own = next((s for s in ("vol_", "flt_", "pan_", "a_", "b_", "c_", "d_") if key.startswith(s)), None)
+        if own and own + "on" not in on:
+            errors.append("%s: sets %s but leaves %s off" % (where, key, own + "on"))
+    return errors
 
 
 def check_preset_line(params, key, val):
@@ -1005,8 +1045,9 @@ def check_preset_line(params, key, val):
 def factory_presets():
     """[(category, name, text)]: one folder per category, both in file order ("NN_" orders them, "_" shows as a
     space). A factory preset sets sound parameters only, never the project's own (the preset index). Every line a
-    sound parameter with a value in range (options by name), every name unique (keys are "builtin:<name>") and
-    short enough for its tile: a typo fails the build, not the device."""
+    sound parameter with a value in range (options by name), the lines together sound (check_preset_sound), every
+    name unique (keys are "builtin:<name>") and short enough for its tile: a typo fails the build, not the device. A
+    category the level-matching has no material for is a warning."""
     params = {p["key"]: p for p in P}
     out, errors, seen = [], [], {}
     for d in sorted(os.listdir(PRESET_DIR)):
@@ -1019,6 +1060,9 @@ def factory_presets():
         category = _shown(d)
         if not category or len(category) > CATEGORY_NAME_MAX:
             errors.append("%s: a category name of 1..%d characters" % (d, CATEGORY_NAME_MAX))
+        if category not in LEVEL_CATEGORIES:
+            print("warning: presets/Factory/%s: tools/reference_mix.h has no material for %r: make preset-levels "
+                  "judges it on the full mix" % (d, category), file=sys.stderr)
         for f in sorted(os.listdir(folder)):
             if not f.endswith(PRESET_EXT):
                 continue
@@ -1027,7 +1071,7 @@ def factory_presets():
             lines = text.split("\n")
             if not lines[0].startswith("grooveforce "):
                 errors.append("%s: no 'grooveforce N' header" % where)
-            seen_keys = {}
+            seen_keys, values = {}, {}
             for n, line in enumerate(lines[1:], 2):
                 if not line.strip():
                     continue
@@ -1041,6 +1085,10 @@ def factory_presets():
                 bad = check_preset_line(params, key, val)
                 if bad:
                     errors.append("%s:%d: %s" % (where, n, bad))
+                else:
+                    opts = params[key].get("options")
+                    values[key] = opts[int(val)] if opts and val.isdigit() else val
+            errors += check_preset_sound(where, values, params)
             name = _shown(f)
             if name in seen:
                 errors.append("%s: the name %r is taken by %s" % (where, name, seen[name]))

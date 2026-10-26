@@ -1,0 +1,15 @@
+grooveforce 1
+echo_on=On
+a_on=On
+a_level=0.9
+a_div=5/16
+a_fb=0.6
+a_mode=Ping-Pong
+a_ftype=BP
+a_cut=3000
+a_reso=0.3
+a_mod=LFO
+a_mshape=Triangle
+a_mrate=2 bars
+a_mcut=0.3
+output=-0.2

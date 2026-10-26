@@ -1,0 +1,25 @@
+grooveforce 1
+echo_on=On
+echo_send=0.6
+a_on=On
+a_level=0.6
+a_div=1/4
+a_fb=0.5
+a_ftype=HP
+a_cut=300
+b_on=On
+b_level=0.5
+b_fb=0.5
+b_mode=Ping-Pong
+b_ftype=BP
+b_cut=1500
+c_on=On
+c_level=0.4
+c_div=1/2
+c_fb=0.5
+c_ftype=HP
+c_cut=500
+time_on=On
+move=Dub Freeze
+move_quant=Bar
+output=-0.2

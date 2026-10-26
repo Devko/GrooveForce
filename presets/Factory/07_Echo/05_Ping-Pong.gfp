@@ -1,0 +1,10 @@
+grooveforce 1
+echo_on=On
+echo_duck=0.3
+echo_width=1.2
+a_on=On
+a_level=0.7
+a_fb=0.5
+a_mode=Ping-Pong
+a_ftype=HP
+a_cut=400

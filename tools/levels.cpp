@@ -72,11 +72,13 @@ Played play(void* lib, const std::string& state, const std::vector<float>& inL, 
     return {gfl::lufs(L, R), pk};
 }
 
-// The preset text with its output= line set to `db` (appended when it has none).
+// The preset text with its output= line set to `db` (appended when it has none). At 0.0 dB, its default, the line goes:
+// a preset sets only what it changes (surface.py refuses a line at its default).
 std::string withOutput(const std::string& text, double db) {
     std::istringstream in(text);
     std::string line, out;
-    bool done = false;
+    const bool none = std::fabs(db) < 0.05;
+    bool done = none;
     char b[64];
     std::snprintf(b, sizeof b, "output=%.1f", db + 0.0);   // + 0.0: no "-0.0"
     while (std::getline(in, line)) {
@@ -138,21 +140,28 @@ int main(int argc, char** argv) {
         if (d.path().extension() == ".gfp") files.push_back(d.path());
     std::sort(files.begin(), files.end());
     std::printf("  %-44s %9s %9s %8s %9s %5s\n", "preset", "in LUFS", "out LUFS", "diff", "Output", "peak");
-    int off = 0;
+    int off = 0, short_ = 0;
+    std::string warned;
     for (const fs::path& f : files) {
         std::ifstream is(f);
         std::stringstream ss;
         ss << is.rdbuf();
         std::string text = ss.str();
+        const std::string category = categoryOf(f.parent_path().filename().string());
+        if (!gfl::knownCategory(category) && category != warned) {
+            std::fprintf(stderr, "warning: %s: no reference material for the category \"%s\": judged on the full mix\n",
+                         f.parent_path().filename().string().c_str(), category.c_str());
+            warned = category;
+        }
         std::vector<float> inL, inR;
-        gfl::referenceMix(inL, inR, gfl::partsFor(categoryOf(f.parent_path().filename().string())));
+        gfl::referenceMix(inL, inR, gfl::partsFor(category));
         const double ref = gfl::lufs(inL, inR);
         double out = currentOutput(text);
         Played p = play(lib, text, inL, inR);
         double diff = p.lufs - ref;
         if (write && std::fabs(diff) > 0.2) {
-            // Output scales the whole sound, so one round nearly settles it; a few more catch the rounding to 0.1 dB
-            // and the output guard.
+            // Output scales what the chain made (all of the sound at Mix 100%, as every factory preset has it), so one
+            // round nearly settles it; a few more catch the rounding to 0.1 dB and the output guard.
             for (int round = 0; round < 6 && std::fabs(diff) > 0.1; ++round) {
                 out = std::clamp(std::round((out - diff) * 10.0) / 10.0, kOutMin, kOutMax);
                 text = withOutput(text, out);
@@ -161,13 +170,19 @@ int main(int argc, char** argv) {
             }
             std::ofstream(f, std::ios::binary) << text;
         }
-        const bool capped = std::fabs(out) >= kOutMax - 0.05;   // as close as the cap allows
+        // At the cap and still off by more than the tolerance: as close as the cap allows. It passes, and says how far
+        // short it is: a preset that needs more than +-9 dB changes the level more than the groove (redesign it).
+        const bool capped = std::fabs(out) >= kOutMax - 0.05 && std::fabs(diff) > tol;
         const bool bad = std::fabs(diff) > tol && !capped;
         off += bad;
+        short_ += capped;
+        char note[64] = "";
+        if (bad) std::snprintf(note, sizeof note, "  <-- not matched");
+        else if (capped) std::snprintf(note, sizeof note, "  (capped: %.1f dB short)", std::fabs(diff));
         std::printf("  %-44s %9.1f %9.1f %+6.1f dB %+6.1f dB %5.2f%s\n", f.lexically_relative(argv[2]).string().c_str(), ref,
-                    p.lufs, diff, out, p.peak, bad ? "  <-- not matched" : capped ? "  (capped)" : "");
+                    p.lufs, diff, out, p.peak, note);
     }
     dlclose(lib);
-    std::printf("%zu presets, %d outside +-%.1f dB\n", files.size(), off, tol);
+    std::printf("%zu presets, %d outside +-%.1f dB, %d capped short of it\n", files.size(), off, tol, short_);
     return off ? 1 : 0;
 }

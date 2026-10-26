@@ -1,0 +1,19 @@
+grooveforce 1
+echo_on=On
+a_on=On
+a_level=0.5
+a_pan=-0.4
+a_sync=Free
+a_ms=95
+a_fb=0.1
+a_ftype=HP
+a_cut=200
+b_on=On
+b_level=0.4
+b_pan=0.4
+b_sync=Free
+b_ms=140
+b_fb=0.05
+b_ftype=HP
+b_cut=300
+output=-0.4
