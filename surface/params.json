@@ -1,0 +1,1079 @@
+{
+ "name": "GrooveForce",
+ "params": [
+  {
+   "key": "status",
+   "name": "Status",
+   "min": 0,
+   "max": 0,
+   "display": "string",
+   "type": "readout"
+  },
+  {
+   "key": "input",
+   "name": "Input",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "output",
+   "name": "Output",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "mix",
+   "name": "Mix",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "preset",
+   "name": "Preset",
+   "min": 0,
+   "max": 1,
+   "display": "string",
+   "type": "stepper"
+  },
+  {
+   "key": "preset_prev",
+   "name": "Preset Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "preset_next",
+   "name": "Preset Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "pre_save",
+   "name": "Save Preset",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "pre_init",
+   "name": "Init Preset",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "cat_1",
+   "name": "Category 1",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_2",
+   "name": "Category 2",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_3",
+   "name": "Category 3",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_4",
+   "name": "Category 4",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_5",
+   "name": "Category 5",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_6",
+   "name": "Category 6",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_7",
+   "name": "Category 7",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_8",
+   "name": "Category 8",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_9",
+   "name": "Category 9",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_10",
+   "name": "Category 10",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_11",
+   "name": "Category 11",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_12",
+   "name": "Category 12",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_13",
+   "name": "Category 13",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_14",
+   "name": "Category 14",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_15",
+   "name": "Category 15",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_16",
+   "name": "Category 16",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "cat_prev",
+   "name": "Categories Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "cat_next",
+   "name": "Categories Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "item_1",
+   "name": "Item 1",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_2",
+   "name": "Item 2",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_3",
+   "name": "Item 3",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_4",
+   "name": "Item 4",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_5",
+   "name": "Item 5",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_6",
+   "name": "Item 6",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_7",
+   "name": "Item 7",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_8",
+   "name": "Item 8",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_9",
+   "name": "Item 9",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_10",
+   "name": "Item 10",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_11",
+   "name": "Item 11",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_12",
+   "name": "Item 12",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_13",
+   "name": "Item 13",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_14",
+   "name": "Item 14",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_15",
+   "name": "Item 15",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_16",
+   "name": "Item 16",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_17",
+   "name": "Item 17",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_18",
+   "name": "Item 18",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_19",
+   "name": "Item 19",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_20",
+   "name": "Item 20",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_21",
+   "name": "Item 21",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_22",
+   "name": "Item 22",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_23",
+   "name": "Item 23",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_24",
+   "name": "Item 24",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "item_prev",
+   "name": "Items Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "item_next",
+   "name": "Items Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "item_page",
+   "name": "Items Page",
+   "min": 0,
+   "max": 0,
+   "display": "string",
+   "type": "readout"
+  },
+  {
+   "key": "br_now",
+   "name": "Loaded",
+   "min": 0,
+   "max": 0,
+   "display": "string",
+   "type": "readout"
+  },
+  {
+   "key": "fav",
+   "name": "Favorite",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "rnd",
+   "name": "Random Pick",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "swing",
+   "name": "Swing",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "swing_unit",
+   "name": "Swing Unit",
+   "options": [
+    "1/16",
+    "1/8"
+   ],
+   "default": "1/16"
+  },
+  {
+   "key": "pump_on",
+   "name": "Pump",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "pump_rate",
+   "name": "Pump Rate",
+   "options": [
+    "1/16",
+    "1/8",
+    "1/4",
+    "1/2",
+    "1 bar"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "pump_curve",
+   "name": "Pump Curve",
+   "options": [
+    "Smooth",
+    "Soft",
+    "Punch",
+    "Hard",
+    "Snap",
+    "Long",
+    "Late",
+    "Linear",
+    "S-Curve",
+    "Hold"
+   ],
+   "default": "Smooth"
+  },
+  {
+   "key": "pump_curve__open",
+   "name": "Pump Curve List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "pump_curve",
+   "type": "enum"
+  },
+  {
+   "key": "pump_depth",
+   "name": "Pump Depth",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "pump_length",
+   "name": "Pump Length",
+   "min": 0,
+   "max": 1,
+   "default": 0.578947,
+   "display": "string"
+  },
+  {
+   "key": "pump_push",
+   "name": "Pump Push",
+   "min": 0,
+   "max": 1,
+   "default": 0.25,
+   "display": "string"
+  },
+  {
+   "key": "pump_trigger",
+   "name": "Pump Trigger",
+   "options": [
+    "Grid",
+    "Input"
+   ],
+   "default": "Grid"
+  },
+  {
+   "key": "pump_sens",
+   "name": "Sensitivity",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "pump_band",
+   "name": "Pump Band",
+   "options": [
+    "Full",
+    "Lows",
+    "Highs"
+   ],
+   "default": "Full"
+  },
+  {
+   "key": "pump_xover",
+   "name": "Crossover",
+   "min": 0,
+   "max": 1,
+   "default": 0.430677,
+   "display": "string"
+  },
+  {
+   "key": "pump_target",
+   "name": "Pump Target",
+   "options": [
+    "All",
+    "Dry",
+    "Echo"
+   ],
+   "default": "All"
+  },
+  {
+   "key": "pump_mix",
+   "name": "Pump Mix",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "shape_on",
+   "name": "Shape",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "shape_depth",
+   "name": "Shape Depth",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "shape_target",
+   "name": "Shape Target",
+   "options": [
+    "All",
+    "Dry",
+    "Echo"
+   ],
+   "default": "All"
+  },
+  {
+   "key": "shape_mix",
+   "name": "Shape Mix",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "vol_on",
+   "name": "Volume",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "flt_on",
+   "name": "Filter",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "pan_on",
+   "name": "Pan",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "vol_shape",
+   "name": "Volume Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "vol_shape__open",
+   "name": "Volume Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "vol_shape",
+   "type": "enum"
+  },
+  {
+   "key": "flt_shape",
+   "name": "Filter Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "flt_shape__open",
+   "name": "Filter Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "flt_shape",
+   "type": "enum"
+  },
+  {
+   "key": "pan_shape",
+   "name": "Pan Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "pan_shape__open",
+   "name": "Pan Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "pan_shape",
+   "type": "enum"
+  },
+  {
+   "key": "vol_rate",
+   "name": "Volume Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "vol_rate__open",
+   "name": "Volume Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "vol_rate",
+   "type": "enum"
+  },
+  {
+   "key": "flt_rate",
+   "name": "Filter Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "flt_rate__open",
+   "name": "Filter Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "flt_rate",
+   "type": "enum"
+  },
+  {
+   "key": "pan_rate",
+   "name": "Pan Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "pan_rate__open",
+   "name": "Pan Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "pan_rate",
+   "type": "enum"
+  },
+  {
+   "key": "vol_depth",
+   "name": "Volume Depth",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "flt_depth",
+   "name": "Filter Depth",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "pan_depth",
+   "name": "Pan Depth",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "vol_phase",
+   "name": "Volume Phase",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "flt_phase",
+   "name": "Filter Phase",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "pan_phase",
+   "name": "Pan Phase",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "flt_type",
+   "name": "Filter Type",
+   "options": [
+    "LP",
+    "BP",
+    "HP"
+   ],
+   "default": "LP"
+  },
+  {
+   "key": "flt_cutoff",
+   "name": "Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "flt_reso",
+   "name": "Resonance",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  }
+ ]
+}
