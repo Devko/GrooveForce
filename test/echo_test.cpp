@@ -297,10 +297,10 @@ void echoSpread() {      // A <- x, then B, C and D <- yA: one hit, then a cloud
 void echoRing() {        // A <- x + yD, B <- yA, C <- yB, D <- yC: the hit goes round
     Rig e;
     P p;
-    on(p, 0, k8);
-    on(p, 1, k16);
-    on(p, 2, k16);
-    on(p, 3, k16);
+    on(p, 0, k8, 1.0f);   // (the feedbacks are the send round the ring: R39)
+    on(p, 1, k16, 1.0f);
+    on(p, 2, k16, 1.0f);
+    on(p, 3, k16, 1.0f);
     p.routing = Echo::kRing;
     const size_t at = 100;
     const size_t delays[4] = {13230, 6615, 6615, 6615};   // A, B, C, D: 33075 round
@@ -326,27 +326,15 @@ void echoRing() {        // A <- x + yD, B <- yA, C <- yB, D <- yC: the hit goes
     CHECK(quietExcept(v.l, {hits[0], hits[1], hits[2]}, 2000) < 0.003f);
 }
 
-// Whether the line has the loopScale() of ruling R36 (1 / its filter's peak gain, when that is over 1). Until the
-// fixed EchoLine reaches this branch the Echo passes the reads on as they are, and echoLoopScale has nothing to test.
-template <class L>
-constexpr auto hasLoopScale(int) -> decltype(std::declval<const L&>().loopScale(), bool()) {
-    return true;
-}
-template <class L>
-constexpr bool hasLoopScale(long) {
-    return false;
-}
-
-void echoLoopScale() {   // what a routing passes on is scaled by the source's loopScale(); what is heard is not
-    if (!hasLoopScale<gf::EchoLine>(0)) return;
-    // A ring of four resonant low-passes at 1 kHz (Q 12), no feedback of their own, a 1 kHz burst going in: every pass
-    // through a line gives the burst 12 times (the filter's peak), the routing gives it back 1/12, so the burst goes round
-    // at the size it came in (less the low cut's 0.001 dB a pass) and does not build. What is heard is the filter's output.
+void echoLoopScale() {   // R36: what a routing passes on is scaled by the source's loopScale(); what is heard is not
+    // A ring of four resonant low-passes at 1 kHz (Q 12), feedback 1, a 1 kHz burst going in: every pass through a line
+    // gives the burst 12 times (the filter's peak), the routing gives it back 1/12, so the burst goes round at the size it
+    // came in (less the low cut's 0.001 dB a pass) and does not build. What is heard is the filter's output.
     Rig e;
     P p;
     p.routing = Echo::kRing;
     for (int i = 0; i < 4; ++i) {
-        Echo::Line& l = onFree(p, i, 100.0f, 0.0f);
+        Echo::Line& l = onFree(p, i, 100.0f, 1.0f);
         l.p.filterType = gf::EchoLine::kLP;
         l.p.cutoffHz = 1000.0f;
         l.p.resonance = 1.0f;
@@ -366,6 +354,157 @@ void echoLoopScale() {   // what a routing passes on is scaled by the source's l
     CHECK(second < 1.05 * first && second > 0.7 * first && later < 1.05 * first && later > 0.05 * first);
     CHECK(first > 0.4 * 0.05 * 12 * 0.707 * 0.5);   // heard unscaled: about 12 times the burst (rms of a sine, a little under its peak gain)
     CHECK(peak(w.l) < 1.5f);
+}
+
+// R39: in a Ring the feedbacks are the send round the ring, and the lines have none of their own.
+void echoRingFeedback() {
+    {   // the hit goes round at the feedbacks it has met: 0.9 after A, 0.5 after B, 0.7 after C, 0.8 after D
+        Rig e;
+        P p;
+        const double beats[4] = {k8, k16, k8, k16};
+        const float fb[4] = {0.9f, 0.5f, 0.7f, 0.8f};
+        const size_t delays[4] = {13230, 6615, 13230, 6615};
+        for (int i = 0; i < 4; ++i) on(p, i, beats[i], fb[i]);
+        p.routing = Echo::kRing;
+        const size_t at = 100;
+        std::vector<size_t> hits;
+        std::vector<double> want;
+        size_t t = at;
+        double a = 1.0;
+        for (size_t k = 0; k < 10; ++k) {
+            t += delays[k % 4];
+            hits.push_back(t);
+            a *= kH0 * (k ? static_cast<double>(fb[(k - 1) % 4]) : 1.0);   // the low cut of the line, the feedback it was passed on at
+            want.push_back(a);
+        }
+        const Wet w = run(e, p, impulseAt(110000, static_cast<int>(at)));
+        for (size_t k = 0; k < hits.size(); ++k) {
+            if (!near(w.l[hits[k]], want[k], 0.003 + 0.01 * want[k])) std::printf("  ring pass %zu: %g, wanted %g\n", k + 1, static_cast<double>(w.l[hits[k]]), want[k]);
+            CHECK(near(w.l[hits[k]], want[k], 0.003 + 0.01 * want[k]));
+        }
+        CHECK(quietExcept(w.l, hits, 2000) < 0.003f);
+    }
+    {   // a line alone in a Ring makes one repeat, whatever its feedback: it has none of its own
+        Rig e;
+        P p;
+        on(p, 0, k8, 0.8f);
+        p.routing = Echo::kRing;
+        const Wet w = run(e, p, impulseAt(60000, 100));
+        CHECK(near(w.l[100 + 13230], kH0, 0.01) && quietExcept(w.l, {100 + 13230}, 2000) < 0.003f);
+    }
+    const double ms[4] = {100.0, 150.0, 80.0, 120.0};   // 450 ms round
+    {   // 0.9 on all four: the ring dies away (0.66 a trip) and never reaches a limiter, so it is linear in the input
+        Wet w[2];
+        float stored = 0.0f;
+        for (int k = 0; k < 2; ++k) {
+            Rig e;
+            P p;
+            p.routing = Echo::kRing;
+            for (int i = 0; i < 4; ++i) onFree(p, i, static_cast<float>(ms[i]), 0.9f);
+            Buf x = silence(15 * kSr);
+            const Buf noise = whiteNoise(kSr, k ? 0.2f : 0.1f, 40);
+            std::copy(noise.begin(), noise.end(), x.begin());
+            w[k] = run(e, p, x);
+            stored = std::max(stored, e.peakStored());
+        }
+        double worst = 0.0;
+        for (size_t i = 0; i < w[0].l.size(); ++i) worst = std::max(worst, static_cast<double>(std::fabs(w[1].l[i] - 2.0f * w[0].l[i])));
+        CHECK(stored <= 1.0f && worst < 1e-5);
+        CHECK(rms(w[0].l, kSr / 2, kSr) > 0.02);                              // it rings
+        CHECK(rms(w[0].l, 14 * kSr, 15 * kSr) < 1e-3 * rms(w[0].l, kSr / 2, kSr));   // and dies
+    }
+    {   // 1 on all four holds for 60 s without growing (the low cut takes a little a pass); never over the limiter
+        Rig e;
+        P p;
+        p.routing = Echo::kRing;
+        for (int i = 0; i < 4; ++i) onFree(p, i, static_cast<float>(ms[i]), 1.0f);
+        const int block = 4410;
+        double early = 0.0, late = 0.0;
+        float top = 0.0f;
+        bool finite = true;
+        Wet w;
+        for (int b = 0; b < 600; ++b) {
+            const Buf L = b < 5 ? whiteNoise(block, 0.3f, 100 + static_cast<uint32_t>(2 * b)) : silence(block);
+            const Buf R = b < 5 ? whiteNoise(block, 0.3f, 101 + static_cast<uint32_t>(2 * b)) : silence(block);
+            go(e, p, L, R, L, R, w, 0, static_cast<size_t>(block), tempo());
+            finite = finite && allFinite(w.l) && allFinite(w.r);
+            top = std::max({top, peak(w.l), peak(w.r)});
+            if (b >= 100 && b < 110) early += rms(w.l) * rms(w.l);
+            if (b >= 570 && b < 580) late += rms(w.l) * rms(w.l);
+        }
+        if (!(late <= 1.001 * early && late > 0.05 * early)) std::printf("  ring held: %g late against %g early\n", late, early);
+        CHECK(finite && top <= 8.0f && e.peakStored() <= 1.00001f);
+        CHECK(late <= 1.001 * early && late > 0.05 * early);
+    }
+    {   // the freeze takes the feedbacks to 1: the passes after it hold their size
+        Rig e;
+        P p;
+        p.routing = Echo::kRing;
+        for (int i = 0; i < 4; ++i) onFree(p, i, 100.0f, 0.5f);
+        const size_t F = 9216;   // after the second pass (8920), before the third (13330)
+        const Buf hit = impulseAt(60000, 100);
+        Wet w;
+        go(e, p, hit, hit, hit, hit, w, 0, F, tempo());
+        p.freeze = true;
+        go(e, p, hit, hit, hit, hit, w, F, hit.size(), tempo());
+        auto pass = [&](size_t k) { return std::fabs(w.l[100 + 4410 * k]); };
+        CHECK(near(pass(1), kH0, 0.01) && near(pass(2), 0.5 * kH0 * kH0, 0.01) && near(pass(3), 0.25 * std::pow(kH0, 3), 0.01));
+        for (size_t k = 4; k <= 10; ++k) CHECK(near(db(pass(k) / pass(3)), 0.0, 0.3));
+    }
+}
+
+// R41: one detector and one follower for the lines are what one each would find.
+void echoSharedKey() {
+    const int n = 5 * kSr;
+    Buf hits = silence(n);
+    for (int a : {13230, 60000, 100000, 140000, 180000}) addBlip(hits, a, 0.5f);
+    for (size_t i = 0; i < hits.size(); ++i) hits[i] += 0.002f * static_cast<float>(std::sin(0.01 * static_cast<double>(i)));   // a floor under them
+    P all;
+    all.sensitivity = 0.7f;
+    for (int i = 0; i < 4; ++i) {
+        Echo::Line& l = on(all, i, i % 2 ? k8 : k16);
+        l.p.filterType = gf::EchoLine::kLP;
+        l.p.cutoffHz = 800.0f;
+        l.pan = 0.3f * static_cast<float>(i) - 0.45f;
+        l.mod.mode = i == 2 ? gf::EchoMod::kFollow : (i == 3 ? gf::EchoMod::kEnv : gf::EchoMod::kEnv);
+        l.mod.rateBeats = i == 0 ? 1.0 : (i == 1 ? 3.0 : 0.5);
+        l.modLevel = 0.8f;
+        l.modCutoff = 0.6f;
+        l.modTime = 0.4f;
+    }
+    Rig together;
+    const Wet sum = run(together, all, hits);
+    Buf wantL(static_cast<size_t>(n), 0.0f), wantR(static_cast<size_t>(n), 0.0f);
+    for (int i = 0; i < 4; ++i) {
+        P one = all;
+        for (int j = 0; j < 4; ++j) one.line[j].on = j == i;
+        Rig alone;
+        const Wet w = run(alone, one, hits);
+        for (size_t k = 0; k < wantL.size(); ++k) {
+            wantL[k] += w.l[k];
+            wantR[k] += w.r[k];
+        }
+    }
+    // (the sum in the same order, so the same but for the device's fused multiply-adds)
+    if (maxDiff(sum.l, wantL) > 1e-6) std::printf("  shared key: differs by %g\n", maxDiff(sum.l, wantL));
+    CHECK(maxDiff(sum.l, wantL) < 1e-6 && maxDiff(sum.r, wantR) < 1e-6);
+    CHECK(peak(sum.l) > 0.05f);
+    // Each line's Env falls at its own rate: A (1 beat) is down 7.5 dB further than B (3 beats) a quarter of a beat on... heard through
+    // their levels alone, panned to the two sides.
+    P two;
+    two.sensitivity = 0.7f;
+    for (int i = 0; i < 2; ++i) {
+        Echo::Line& l = on(two, i, k16);
+        l.mod.mode = gf::EchoMod::kEnv;
+        l.mod.rateBeats = i ? 4.0 : 1.0;
+        l.modLevel = 1.0f;
+        l.pan = i ? 1.0f : -1.0f;
+    }
+    Rig e;
+    const Wet w = run(e, two, hits);
+    const size_t at = 13230 + 6615;   // the hit's repeat, 1/16 on: a sixteenth of the way down the 4-beat fall, a quarter of the 1-beat
+    const double left = rms(w.l, at, at + 900), right = rms(w.r, at, at + 900);
+    CHECK(left > 0.0 && right > 0.0 && left < 0.4 * right);
 }
 
 void echoRoutingChange() {   // a routing change is a crossfade: afterwards the new routing is exactly what a fresh Echo has
@@ -923,6 +1062,44 @@ void echoModLevel() {    // modLevel: the level dips to 1 - modLevel at the modu
     CHECK(near(rms(half.l, 2 * kSr, 3 * kSr) / rms(b.l, 2 * kSr, 3 * kSr), 0.5, 0.02));
 }
 
+void echoModShared() {   // R41: the one follower and the one detector, heard through the lines
+    // Follow on the level: a 1 kHz tone at 0.05 and then at 0.5 under the key; the line's level follows it (2.14 times the level,
+    // cut at 1), so the wet is far more than the 10 to 1 of the tone.
+    {
+        P p;
+        Echo::Line& l = onFree(p, 0, 5.0f);
+        l.mod.mode = gf::EchoMod::kFollow;
+        l.modLevel = 1.0f;
+        Buf tone = sine(1000.0, 3 * kSr, 0.5f);
+        for (size_t i = 0; i < 3 * kSr / 2; ++i) tone[i] *= 0.1f;
+        Rig e;
+        const Wet w = run(e, p, tone);
+        const double quiet = rms(w.l, kSr, 3 * kSr / 2), loud = rms(w.l, 5 * kSr / 2, 3 * kSr);
+        if (!(loud > 50.0 * quiet)) std::printf("  follow: %g loud against %g quiet\n", loud, quiet);
+        CHECK(loud > 50.0 * quiet && quiet > 0.0);
+        CHECK(near(loud, 0.5 * 0.7071, 0.03));   // the follower reads 1 for a 0.5 tone (2.14 times its level, cut at 1)
+    }
+    // The detector's sensitivity is the Echo's: a tone that steps up 1.6 times is a hit only at the keenest setting.
+    {
+        Buf tone = sine(1000.0, 3 * kSr, 0.2f);
+        for (size_t i = kSr; i < tone.size(); ++i) tone[i] *= 1.6f;
+        double heard[2];
+        for (int k = 0; k < 2; ++k) {
+            P p;
+            Echo::Line& l = onFree(p, 0, 5.0f);
+            l.mod.mode = gf::EchoMod::kEnv;
+            l.mod.rateBeats = 4.0;
+            l.modLevel = 1.0f;
+            p.sensitivity = static_cast<float>(k);
+            Rig e;
+            const Wet w = run(e, p, tone);
+            heard[k] = rms(w.l, kSr + 500, kSr + 4000);
+        }
+        if (!(heard[1] > 20.0 * heard[0])) std::printf("  sensitivity: %g at 1, %g at 0\n", heard[1], heard[0]);
+        CHECK(heard[1] > 20.0 * heard[0] && heard[1] > 0.05);
+    }
+}
+
 void echoModTime() {     // modTime: up to 2% of the time at the modulator's 1, glided
     const size_t T = 6615;
     const int n = 3 * kSr;
@@ -1168,7 +1345,12 @@ void echoTail() {        // how long it rings: the lines' tails along the routin
     p.routing = Echo::kRing;
     CHECK(tail(p) < (1 << 29));        // a ring of two lines, D and C off: a chain
     for (int i = 2; i < 4; ++i) on(p, i, k8, 0.5f);
-    CHECK(tail(p) >= (1 << 29));       // all four round: it never dies
+    const int round = tail(p);
+    CHECK(round < (1 << 29) && round >= 3 * 4 * 13230);   // all four round at 0.5 each: it dies, in 3 trips to -60 dB
+    for (Echo::Line& l : p.line) l.p.feedback = 1.0f;
+    CHECK(tail(p) >= (1 << 29));       // at 1 on all four it never does (R39)
+    p.line[2].p.feedback = 0.0f;
+    CHECK(tail(p) < (1 << 29));        // a 0 anywhere opens the ring
     p.routing = Echo::kParallel;
     p.freeze = true;
     CHECK(tail(p) >= (1 << 29));
@@ -1222,13 +1404,30 @@ P clickBase() {          // A and B on, C and D set but off
 P ringBase() {
     P p;
     const float ms[4] = {70.0f, 90.3f, 61.7f, 83.3f};
-    for (int i = 0; i < 4; ++i) onFree(p, i, ms[i], 0.0f).pan = 0.25f * static_cast<float>(i) - 0.4f;
+    for (int i = 0; i < 4; ++i) onFree(p, i, ms[i], 0.5f).pan = 0.25f * static_cast<float>(i) - 0.4f;
     p.routing = Echo::kRing;
     return p;
 }
 
+// The steepest step of x[from, to) against the size of the sound there: each step over the peak of the three 110-sample
+// blocks (a period of the 400 Hz tone) round it. A tone that swells or fades, as the wet does for a while after a routing
+// has changed what goes round, is not taken for a click, and a step in a quiet place is not made big by the quiet (the
+// peak is held at 0.05 at least). A pure sine gives 2 pi 400 / 44100 = 0.057.
+double relSteepest(const Buf& x, size_t from, size_t to) {
+    const size_t blk = 110;
+    std::vector<float> peaks(x.size() / blk + 3, 0.0f);
+    for (size_t i = 0; i < x.size(); ++i) peaks[i / blk] = std::max(peaks[i / blk], std::fabs(x[i]));
+    double m = 0.0;
+    for (size_t i = std::max<size_t>(from, 1); i < to && i < x.size(); ++i) {
+        const size_t b = i / blk;
+        const float a = std::max({b ? peaks[b - 1] : 0.0f, peaks[b], peaks[b + 1], 0.05f});
+        m = std::max(m, static_cast<double>(std::fabs(x[i] - x[i - 1])) / a);
+    }
+    return m;
+}
+
 // A 400 Hz tone in both channels, a little different in each; at 3 s `after` takes over from `before`.
-// The steepest step in the wet around the change stays within `limit` of the steeper of the two settled states
+// The steepest step in the wet around the change (against the sound it is in) stays within `limit` of the steeper of the two settled states
 // (or, with settled == false, of the state before it, for a modulator that keeps moving the wet's own edges).
 // `lead`, if given, changes `before` for the first second and a half (a freeze is held after the lines have filled).
 void click(const char* name, P before, void (*change)(P&), double limit = 1.25, bool settled = true, void (*lead)(P&) = nullptr) {
@@ -1244,8 +1443,8 @@ void click(const char* name, P before, void (*change)(P&), double limit = 1.25, 
     go(e, before, L, R, L, R, w, early, at, playingAt(100.0, static_cast<double>(early) / kSr * 100.0 / 60.0));
     go(e, after, L, R, L, R, w, at, n, playingAt(100.0, static_cast<double>(at) / kSr * 100.0 / 60.0));
     for (const Buf* ch : {&w.l, &w.r}) {
-        const double was = steepest(*ch, at - kSr / 2, at), will = steepest(*ch, n - kSr / 2, n);
-        const double during = steepest(*ch, at, at + 2 * kSr);
+        const double was = relSteepest(*ch, at - kSr / 2, at), will = relSteepest(*ch, n - kSr / 2, n);
+        const double during = relSteepest(*ch, at, at + 2 * kSr);
         const double bound = std::max(0.01, limit * std::max(was, settled ? will : 0.0));
         if (!(during <= bound)) std::printf("  click: %s: steepest %g, before %g, after %g\n", name, during, was, will);
         CHECK(during <= bound);
@@ -1343,6 +1542,7 @@ void echoTests() {
     echoSpread();
     echoRing();
     echoLoopScale();
+    echoRingFeedback();
     echoRoutingChange();
     echoOff();
     echoFades();
@@ -1356,6 +1556,8 @@ void echoTests() {
     echoTone();
     echoFeedbackOffset();
     echoModEnv();
+    echoSharedKey();
+    echoModShared();
     echoModLevel();
     echoModTime();
     echoModSlewed();

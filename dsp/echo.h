@@ -16,14 +16,28 @@
 //   Spread     A <- x   B, C, D <- yA
 //
 // What a routing passes from one line to another is the source line's read times the line's loopScale()
-// (1 / its filter's peak gain when that is over 1: a resonant low-pass or high-pass In loop), so the
-// loop gain round any routing never exceeds the feedback and a Ring cannot build up. What is heard is
-// not scaled: each line that is on is heard at its Level and Pan whatever the routing. A line that is
-// off is neither read nor written, and gives a routing nothing (a Serial chain with B off passes nothing
-// to C and D). A routing change crossfades the lines' inputs: the design says over one chunk (32
-// samples, 0.73 ms), but a chunk is faster than the plugin's rule that no gain edge is faster than 1 ms,
-// so it takes a hair over 1 ms (45 samples) and ends in the next chunk. The crossfade moves each of the
-// five coefficients a line's input is made of (x, yA..yD) from where it is to the routing's 0 or 1.
+// (R36: 1 / its filter's peak gain when that is over 1, a resonant low-pass or high-pass In loop), so a
+// resonance never raises what is passed on. What is heard is not scaled: each line that is on is heard at
+// its Level and Pan whatever the routing. A line that is off is neither read nor written, and gives a
+// routing nothing (a Serial chain with B off passes nothing to C and D). A routing change crosses the
+// lines' inputs over time: the design says one chunk (32 samples, 0.73 ms), but a chunk is faster than
+// the plugin's rule that no gain edge is faster than 1 ms, so it takes a hair over 1 ms (45 samples,
+// ruling R40) and ends in the next chunk. The crossfade moves each of the five coefficients a line's
+// input is made of (x, yA..yD) from where it is to the routing's 0 or 1, and the feed gain below.
+//
+// What the feedback knobs mean (ruling R39). In Serial, Pairs and Spread, which have no cycle, every line
+// keeps its own feedback (its read, filtered In loop, fed back to its own input: a line of repeats) and
+// passes y x loopScale on at gain 1, feed-forward and stable. In Ring, the one routing with a cycle, a
+// line's feedback is its SEND round the ring and the line has NO feedback of its own: line i writes
+// x_i + fb(i-1) x loopScale(i-1) x y(i-1), with x only on A (A gets the send and D's, B only A's, C only
+// B's, D only C's; "fb" is the feedback with the offset and the freeze). So the ring's loop gain is the
+// product of the four feedbacks, at most 1: it never runs away (feedback 1 on all four holds it, and the
+// limiters only ever catch drive or a sum of the send and the ring), and a feedback of 0 on any line opens
+// the ring. A line alone in a Ring, or with a neighbour off, makes one repeat and no more. The Mode of a
+// line (ping-pong, mono) shapes the line's input as always; its cross-over of the repeats lives in the
+// line's own feedback, which a Ring does not have. The gain a feed is passed on at (1 in the
+// feed-forward routings, fb x loopScale in a Ring) is slewed like any gain, so a switch into or out of a
+// Ring is as clean as any routing change.
 //
 // Lines. On/off fades the line over 10 ms: its input (so what it records starts and ends gently) and
 // its output (what is heard and what it feeds on). Off and faded out it is not touched: no read, no
@@ -41,10 +55,10 @@
 // mode change) before it moves anything, and moves three things by an amount each, all at the
 // modulator's 1 (at 0 nothing moves): the cutoff by modCutoff x 4 octaves, the time by modTime x 2%, and
 // the level, which dips to 1 - modLevel at the modulator's 0. The lines limit the rest themselves (the
-// cutoff slews at most an octave a millisecond, the time glides by Tape or Fade). Each line runs its own
-// detector or follower over the key (Envs on all four lines cost about 5k ARM instructions a chunk more
-// than LFOs do; four Envs with one sensitivity could share a detector, which this does not). The Env
-// modulators share one sensitivity (the Echo's).
+// cutoff slews at most an octave a millisecond, the time glides by Tape or Fade). One transient detector
+// and one follower run on the key for the whole Echo (R41), only in the chunks where some line that runs
+// is in Env or Follow, and each line's modulator is given what they found (EchoMod::nextShared): every Env
+// falls at its own rate, and the detector's sensitivity is the Echo's.
 //
 // The Echo's controls:
 //   send          the input into the lines, 0..1 (a gain, slewed). Only the first line of a routing hears it,
@@ -77,13 +91,14 @@
 // (the Hermite overshoot) and the wet at most 4 x 1.25 = 5 at the default pan and width (a Ring of
 // full-scale noise at feedback 1 reaches 4.2), 4 x 1.25 x sqrt2 = 7.1 with every line panned hard, and a
 // side of the width at 1.5 is at most 1.5 times the sum's. A resonant filter In loop can put out more than
-// was written to it (its peak gain, up to 12): the line's loopScale() keeps that out of the routings,
-// not out of the ears. Input and key may be anything: NaN and infinity are silence, finite input is held
-// to +-4 before any sum (the device's float maths turns 0.5 a + 0.5 b into 0.5 (a + b), which
+// was written to it (its peak gain, up to 12): the line's loopScale() keeps that out of the loops and the
+// routings, not out of the ears. Input and key may be anything: NaN and infinity are silence, finite input
+// is held to +-4 before any sum (the device's float maths turns 0.5 a + 0.5 b into 0.5 (a + b), which
 // overflows for +-3e38), so the wet is finite for any input and any parameters.
 //
 // tailSamples(): the longest ring of a line that runs, along its routing (Serial: the lines in a row add
-// up; Pairs and Spread: the longest path), endless when frozen or when a Ring of all four goes round.
+// up; Pairs and Spread: the longest path), endless when frozen or when a Ring of all four goes round with
+// feedbacks whose product is 1; below that, the trips round it take to fall 60 dB.
 #include "common.h"
 #include "echo_line.h"
 #include "echo_mod.h"
@@ -100,7 +115,7 @@ public:
     enum Routing : int { kParallel, kSerial, kPairs, kRing, kSpread };
     struct Line {
         bool on = false; float level = 1.0f; float pan = 0.0f;   // pan -1..1, constant power
-        EchoLine::Params p;           // timeMod and cutoffModOct are the Echo's (the modulator, tone): what is set here is replaced
+        EchoLine::Params p;           // timeMod and cutoffModOct are the Echo's (the modulator, tone): what is set here is replaced; feedback: see R39 in the header
         EchoMod::Params mod;          // sensitivity and swing are the Echo's
         float modCutoff = 0.0f;   // -1..1: ±4 octaves at the modulator's swing
         float modTime = 0.0f;     // -1..1: ±2% of the time
@@ -111,11 +126,11 @@ public:
         int routing = kParallel;
         float send = 1.0f;          // 0..1: the input into the lines
         float duck = 0.0f;          // 0..1: the wet ducks under the key (EffectForce's law)
-        bool freeze = false;        // feedback to 1 and the send closed, glided 20 ms
+        bool freeze = false;        // feedback to 1 (every line's, or in a Ring its send round the ring) and the send closed, glided 20 ms
         int glide = EchoLine::kTape;
         float width = 1.0f;         // 0..1.5: M/S width of the wet
         float level = 1.0f;         // 0..1: the wet into the chain
-        float feedbackOffset = 0.0f;// -1..1 added to every line's feedback (clamped 0..1)
+        float feedbackOffset = 0.0f;// -1..1 added to every line's feedback (clamped 0..1); in a Ring, to its send round the ring
         float toneOct = 0.0f;       // -4..4 octaves on every line's cutoff
         float sensitivity = 0.5f;   // the Env modulators' detector
         Swing swing;                // the LFOs' grid (Groove::stepSwing)
@@ -168,6 +183,10 @@ private:
     Slot slot_[kLines];
     EchoMod mod_[kLines];
     ef::Ramp send_, level_, width_, duckGain_;
+    ef::Ramp feedG_[kLines];     // the gain each line's read is passed on at: loopScale (x the feedback in a Ring)
+    TransientDetector det_;      // R41: one for the whole Echo, on the key
+    KeyFollower fol_;
+    float sens_ = -1.0f;         // what the detector is set to (-1: nothing yet)
     float freeze_ = 0.0f;        // 0..1: the freeze as it has got to
     float duckEnv_ = 0.0f;
     // The routing's coefficients as they have got to: the lines' inputs are wx x + sum wy[k] feed[k].

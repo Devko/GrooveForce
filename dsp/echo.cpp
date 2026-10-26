@@ -44,16 +44,6 @@ constexpr Wire kWire[Echo::kRoutings][Echo::kLines] = {
 
 float cleanInput(float v) { return std::isfinite(v) ? std::clamp(v, -kInputClamp, kInputClamp) : 0.0f; }
 
-// A line that has a loopScale() (the resonance fix) gives it; one that has not is 1.
-template <class L>
-auto loopScaleOf(const L& line, int) -> decltype(static_cast<float>(line.loopScale())) {
-    return static_cast<float>(line.loopScale());
-}
-template <class L>
-float loopScaleOf(const L&, long) {
-    return 1.0f;
-}
-
 } // namespace
 
 Echo::Echo() = default;
@@ -93,6 +83,10 @@ void Echo::reset() {
         mod_[i].reset();
         if (st_) st_->line[i].reset();
     }
+    for (ef::Ramp& g : feedG_) g = ef::Ramp();
+    det_.reset();
+    fol_.reset();
+    sens_ = -1.0f;
     freeze_ = 0.0f;
     duckEnv_ = 0.0f;
     fresh_ = true;
@@ -211,14 +205,36 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
     }
     duckGain_.to(toward(duckGain_.value(), duckT, slope), n);
 
+    // The key's detector and follower (R41): one for the whole Echo, run in the chunks where a line that runs needs
+    // them, and every line's modulator is given what they found.
+    bool needEnv = false, needFollow = false;
+    for (int i = 0; i < kLines; ++i)
+        if (slot_[i].runs) {
+            needEnv = needEnv || p_.line[i].mod.mode == EchoMod::kEnv;
+            needFollow = needFollow || p_.line[i].mod.mode == EchoMod::kFollow;
+        }
+    int onset = -1;
+    float followed = 0.0f;
+    if (needEnv) {
+        if (p_.sensitivity != sens_) {
+            sens_ = p_.sensitivity;
+            det_.setSensitivity(sens_);
+        }
+        onset = det_.process(kL, kR, n);
+    }
+    if (needFollow) followed = fol_.process(kL, kR, n);
+
     // Phase 1, every line that runs: its modulator, its parameters, and its read (faded).
     const Wire* wire = kWire[p_.routing];
-    float scale[kLines];
+    const bool ring = p_.routing == kRing;   // R39: there a line's feedback is its send round the ring, and it has none of its own
+    float feedT[kLines];   // the gain each line's read is passed on at, where it is going
+    bool fresh[kLines];
     bool needX = xfade_;
     bool isSrc[kLines];
     for (int k = 0; k < kLines; ++k) isSrc[k] = xfade_;
     for (int i = 0; i < kLines; ++i) {
-        scale[i] = 1.0f;
+        feedT[i] = 1.0f;
+        fresh[i] = false;
         Slot& s = slot_[i];
         if (!s.runs) continue;
         ++running_;
@@ -226,19 +242,20 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
         if (wire[i].src >= 0) isSrc[wire[i].src] = true;
         const Line& l = p_.line[i];
         EchoLine& line = st_->line[i];
-        const bool fresh = !s.live;   // coming on from rest: the fade covers it, the values start where they are going
+        fresh[i] = !s.live;   // coming on from rest: the fade covers it, the values start where they are going
         s.live = s.dirty = true;
 
         EchoMod::Params mp = l.mod;
         mp.sensitivity = p_.sensitivity;
         mp.swing = p_.swing;
-        const float m = mod_[i].next(mp, t_, kL, kR, n);
-        s.mod = fresh ? m : toward(s.mod, m, slope);
+        const float m = mod_[i].nextShared(mp, t_, n, onset, followed);
+        s.mod = fresh[i] ? m : toward(s.mod, m, slope);
 
         EchoLine::Params lp = l.p;
         lp.glide = p_.glide;
-        const float fb = std::clamp(ef::clampParam(l.p.feedback, 0.0f, 1.0f, 0.0f) + p_.feedbackOffset, 0.0f, 1.0f);
-        lp.feedback = fb + (1.0f - fb) * freeze_;
+        const float base = std::clamp(ef::clampParam(l.p.feedback, 0.0f, 1.0f, 0.0f) + p_.feedbackOffset, 0.0f, 1.0f);
+        const float fb = base + (1.0f - base) * freeze_;
+        lp.feedback = ring ? 0.0f : fb;
         lp.timeMod = 1.0f + kModTime * l.modTime * s.mod;
         lp.cutoffModOct = p_.toneOct + kModOctaves * l.modCutoff * s.mod;
         line.set(lp, t_);
@@ -257,8 +274,8 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
             }
             s.fade = f;
         }
-        const float sc = loopScaleOf(line, 0);
-        if (sc < 1.0f && sc >= 0.0f) scale[i] = sc;
+        const float sc = line.loopScale();   // R36
+        feedT[i] = (ring ? fb : 1.0f) * (sc >= 0.0f && sc <= 1.0f ? sc : 1.0f);
 
         // The heard gains: level, the modulator's dip, the pan.
         if (l.pan != s.pan) {
@@ -269,7 +286,7 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
             s.pan = l.pan;
         }
         const float g = l.level * (1.0f - l.modLevel * (1.0f - s.mod));
-        if (fresh) {
+        if (fresh[i]) {
             s.gl.jump(g * s.panL);
             s.gr.jump(g * s.panR);
         } else {
@@ -300,13 +317,27 @@ void Echo::process(const float* inL, const float* inR, const float* keyL, const 
                 hR_[k] += yr[k] * gr;
             }
         }
-        // What the routing passes on: the read at the line's loopScale.
+        // What the routing passes on: the read at its feed gain (1 in the feed-forward routings, the feedback in a
+        // Ring, times the line's loopScale), the gain moved in a straight line across the chunk and no faster than a
+        // full scale in 1 ms.
+        ef::Ramp& fg = feedG_[i];
+        if (fresh[i] || !isSrc[i]) fg.jump(feedT[i]);
+        else fg.to(toward(fg.value(), feedT[i], slope), n);
         feedL[i] = yl;
         feedR[i] = yr;
-        if (scale[i] != 1.0f && isSrc[i]) {
-            for (int k = 0; k < n; ++k) {
-                sL_[i][k] = yl[k] * scale[i];
-                sR_[i][k] = yr[k] * scale[i];
+        if (isSrc[i] && (fg.moving() || fg.value() != 1.0f)) {
+            if (fg.moving()) {
+                for (int k = 0; k < n; ++k) {
+                    const float g = fg.next();
+                    sL_[i][k] = yl[k] * g;
+                    sR_[i][k] = yr[k] * g;
+                }
+            } else {
+                const float g = fg.value();
+                for (int k = 0; k < n; ++k) {
+                    sL_[i][k] = yl[k] * g;
+                    sR_[i][k] = yr[k] * g;
+                }
             }
             feedL[i] = sL_[i];
             feedR[i] = sR_[i];
@@ -417,10 +448,22 @@ int Echo::tailSamples() const {
     int count = 0;
     for (const Slot& s : slot_) count += s.runs ? 1 : 0;
     if (count == 0) return 0;
-    if (p_.freeze || (p_.routing == kRing && count == kLines)) return static_cast<int>(kForever);   // it holds, or it goes round for ever
-    const Wire* wire = kWire[p_.routing];
+    if (p_.freeze) return static_cast<int>(kForever);   // it holds
     int64_t own[kLines], reach[kLines];
     for (int i = 0; i < kLines; ++i) own[i] = reach[i] = slot_[i].runs ? st_->line[i].tailSamples() : 0;
+    if (p_.routing == kRing && count == kLines) {
+        // R39: the lines have no feedback of their own; it goes round, a trip at a time, at the product of the four feedbacks.
+        double product = 1.0;
+        int64_t trip = 0;
+        for (int i = 0; i < kLines; ++i) {
+            product *= std::clamp(ef::clampParam(p_.line[i].p.feedback, 0.0f, 1.0f, 0.0f) + p_.feedbackOffset, 0.0f, 1.0f);
+            trip += own[i];
+        }
+        if (!(product < 0.999999)) return static_cast<int>(kForever);   // it holds for ever
+        const double trips = product > 1e-9 ? std::floor(std::log(1e-3) / std::log(product)) + 1.0 : 1.0;   // down to -60 dB
+        return static_cast<int>(std::min(trips * static_cast<double>(trip), static_cast<double>(kForever)));
+    }
+    const Wire* wire = kWire[p_.routing];
     for (int pass = 0; pass < kLines; ++pass)   // (a ring with one line off is a chain: no cycle)
         for (int i = 0; i < kLines; ++i)
             if (slot_[i].runs) {
