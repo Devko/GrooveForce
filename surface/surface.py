@@ -441,8 +441,9 @@ def build_layout():
     L.knob(S8[3], R2 + 126, "swing")
     L.hseg(S8[3], R2 + 244, "swing_unit", ON_SW)
 
-    # MOVES: the 16 Moves as pads (the plugin names and lights them; a tap fires the Move at the quantize), and under
-    # them the mode and the quantize every Move shares, the Move playing and GO, which fires it again.
+    # MOVES: the 16 Moves as pads (the plugin names them and lights the ones that play or wait; a tap selects the Move
+    # and fires it at the quantize), and under them the mode and the quantize every Move shares, the selected Move
+    # (the `move` parameter's own text) and GO, which fires it again.
     L.page("MOVES", ["move", "move_mode", "move_quant"])
     L.header()
     L.card(24, R1, 1232, 336, "MOVES")
@@ -1252,7 +1253,7 @@ for p, div in LINES:
     enum(p + "_ftype", n + " Filter Type", LINE_FILTERS, "LP")
     num(p + "_cut", n + " Cutoff", "log", 20, 20000, 20000, "hz")
     num(p + "_reso", n + " Resonance", "lin", 0, 1, 0, "pct")
-    enum(p + "_place", n + " Filter Place", LINE_PLACES, "In Loop")
+    enum(p + "_place", n + " Flt Place", LINE_PLACES, "In Loop")
     num(p + "_drive", n + " Drive", "lin", 0, 1, 0, "pct")
     num(p + "_wow", n + " Wow", "lin", 0, 1, 0, "pct")
     enum(p + "_mod", n + " Modulator", LINE_MODS, "Off")
@@ -1265,8 +1266,10 @@ for p, div in LINES:
     num(p + "_mlevel", n + " Mod Level", "lin", 0, 1, 0, "pct")      # and the level
 
 # Time: the always-recording ring behind the Groove and the Moves; and the Moves, one tap each on the grid. The
-# Move parameter is the one being played, None at rest, and automatable: a change of it fires that Move at the
-# quantize. The 16 tiles and GO act when pressed (the plugin lights and names the tiles).
+# Move parameter holds the SELECTED Move (R35): it stays where it is when the Move ends, and a preset or project
+# saves it. It is automatable: a change of it fires the new Move at the quantize, and None stops a Move that plays.
+# A tile tap selects its Move and fires it, GO fires the selected one again (a preset or project load fires nothing).
+# The plugin names the 16 tiles and lights the ones whose Move plays or waits for its line.
 enum("time_on", "Time", ON_OFF, "Off")
 enum("time_place", "Time Place", TIME_PLACES, "Post")
 enum("time_groove", "Time Groove", TIME_GROOVES, "Off")
