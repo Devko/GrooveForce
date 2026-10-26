@@ -36,12 +36,15 @@
 // Anything the curves cannot foresee is a different kind of jump: the lag asked for changes (a groove's
 // swing), the pattern is changed or the song position locates or the tempo changes under a pattern. The playhead
 // then lands somewhere else than it was heading, and the old head plays on at its last speed for kFade
-// samples while it crossfades into the new one, starting at that sample (a caller that wants such a change to end on a
-// line starts it 5 ms earlier, with a chunk cut to the sample). A change that moves the playhead by less than half a
+// samples while it crossfades into the new one, starting at that sample (see process() for how a caller makes such a
+// change end on a line). A change that moves the playhead by less than half a
 // frame needs no crossfade.
 //
 // With no pattern in range, a lag of 0 and nothing fading, process() leaves the input alone: bit for bit,
 // while the ring records.
+//
+// Time, the part (class Time, below), is this engine with a groove: it decides the lag asked for, per sample, from the
+// song position, and cuts each chunk where the lag has to change so that the change ENDS on its grid line.
 //
 // Memory. allocate() (UI thread; the plugin calls it the first time Time is switched on) makes the ring and
 // hands it over through an atomic pointer, as the looper does; until then process() passes its input through
@@ -49,6 +52,7 @@
 // The position is MPC's song position while it plays, else a clock that runs on at the tempo from where the last
 // chunk ended: a pattern's start is in beats on that clock (nextBeat() says where it is).
 #include "common.h"
+#include "grid.h"
 
 #include <atomic>
 #include <cstdint>
@@ -119,7 +123,15 @@ public:
     // In place, any n >= 1. The playhead's source for this chunk: `lagBeats` behind now (>= 0), or, with
     // `pattern` >= 0, the pattern at x = (the song position - patternStart) beats from its start. A pattern
     // is in range from 5 ms before its start to its end (a loopable one for as long as it is asked for); out of
-    // range the lag asked for applies. Jumps crossfade over 5 ms and end on the line where they happen.
+    // range the lag asked for applies. A pattern's own jumps crossfade over 5 ms and end on the line where they happen.
+    //
+    // For a caller (Time is the first):
+    //  - A change of lagBeats between calls is not scheduled: it crossfades over the kFade samples from this call's
+    //    first sample. To end on a line, start a call at line - kFade (cut the chunk there) with the new lag.
+    //  - Keep passing `pattern` through the chunk that contains its end: the crossfade back to lagBeats is inside it.
+    //    A loopable pattern repeats for as long as it is passed, so stop passing it at its length for a one shot.
+    //  - patternStart is in the song position's beats while the transport plays, and in nextBeat()'s clock while it is
+    //    stopped.
     void process(float* L, float* R, int n, const ef::Transport& t, int pattern, double patternStart, double lagBeats);
 
     // Where the next chunk starts on the clock a pattern's start is measured on while the transport is stopped.
@@ -174,6 +186,108 @@ private:
     int fade_ = 0;
 
     float g_ = 1.0f;                // the gain
+};
+
+// Time: the engine with its grooves (docs/DESIGN.md, "Time") and the Moves' patterns over them.
+//
+// Swing on the audio (ruling R25). Pump and Shape swing their steps; Time swings the audio itself, so straight
+// hats groove as they do on an MPC. Each pair of units (the Swing's unit, 1/16 or 1/8: u beats) is [c, c + 2u) from a
+// multiple of 2u, and the second unit starts at c + 2u * amount instead of c + u. Before the second unit's straight line
+// c + u the lag is 0; from it, the lag is 2u * amount - u; at c + 2u it is 0 again. Each of those changes is a jump
+// whose 5 ms crossfade ENDS on its line, so a hit on the line is never heard early, and no pitch bends: the hit that was
+// on c + u comes out on c + 2u * amount (at 120 BPM on 1/16, 58% is 20 ms late and 66% is 40 ms).
+//
+// How a change ends on its line. TimeCore crossfades a changed lag over kFade samples from the first sample of the call
+// that changes it. The lines are known ahead, so Time asks for each lag kFade samples early: the lag asked at a sample is the
+// groove's at the position 5 ms on. A line that falls inside a chunk cuts the chunk there, as many pieces as there are
+// lines in it (usually one), and the piece after the cut asks the new lag. A line is reached by the first sample at or
+// after it (a thousandth of a sample's slack, so a line that falls exactly on a sample is that sample's).
+// TimeCore cannot nest two crossfades (a second restarts from where the first was heading, a click if they differ), so
+// a change of lag that the groove did not schedule (a knob, a groove switched, a pattern's end close behind another
+// change) waits for the crossfade going on to end; a change of less than half a frame, which TimeCore makes without
+// one (a tempo ramp moving a swing's lag), neither waits nor makes the rest wait. The groove's lines are far enough
+// apart not to wait for each other (a unit is 15 ms at the fastest tempo).
+//
+// Drunk: a lag per 16th, from a hash of the 16th's index in its bar (0..amount * 15 ms), so it is the same on every bar and
+// wherever MPC loops; each change ends on its 16th's line. Push: a constant lag of amount * 20 ms. Off: no lag, and with
+// no pattern the input passes bit for bit (the ring only records).
+//
+// A pattern (`pattern` >= 0) overrides the groove while it plays: the groove's lines inside it are not followed (the lag
+// asked is held, and TimeCore's pre-roll starts from it), and its end crossfades back to the lag the groove has at that
+// line. When the pattern ends off a line (after a one shot, or a stop), the groove stays off, the lag 0, until the next
+// unit line, and resumes there. A pattern that goes round by itself ends in a crossfade to the live input, not to the
+// lag, so one that is not looping and ends on a line resumes on the line after. `loop` repeats the pattern until the
+// caller stops asking (pattern -1): a loopable one by TimeCore's own wrap, any other as a new lap each time, the next lap's
+// 5 ms pre-roll replacing the last lap's end.
+//
+// The song position is MPC's while it plays; stopped, the grid runs on at the tempo from where it was, seeded from
+// MPC's position on the first chunk after reset() (as Pump and Shape do), and patternStart is on that clock.
+//
+// Memory is TimeCore's: allocate() on the UI thread; until then the input passes and nothing is read.
+class Time {
+public:
+    enum Groove : int { kOff, kSwing, kDrunk, kPush };
+    struct Params {
+        int groove = kOff;
+        float amount = 0.5f;        // Drunk: up to 15 ms late per 16th; Push: up to 20 ms late
+        Swing swing;                // Swing's amount and unit (the global Swing)
+        int pattern = -1;           // a Move's pattern, -1 none
+        double patternStart = 0.0;  // beats where it started (a grid line)
+        bool loop = false;          // repeat the pattern until told otherwise
+    };
+
+    static constexpr float kDrunkMs = 15.0f;    // Drunk's longest lag, at amount 1
+    static constexpr float kPushMs = 20.0f;     // Push's, at amount 1
+    static constexpr double kReachBeats = 8.0;  // how far back a pattern can read (the library holds to this): its tail
+
+    Time();
+    bool allocate() { return core_.allocate(); }
+    bool allocated() const { return core_.allocated(); }
+
+    void reset();
+    void set(const Params& p, const ef::Transport& t);   // once per chunk, before process()
+    void process(float* L, float* R, int n);             // in place; n >= 1, at most ef::kChunk as the contract says (any n works)
+
+    // How long it sounds after the input stops: the lag of the groove, a pattern's reach back, and a crossfade.
+    int tailSamples() const { return tail_; }
+
+    // Where the next chunk starts on the clock a pattern's start is measured on while the transport is stopped.
+    double nextBeat() const { return pos_; }
+
+private:
+    // One piece of a chunk: what TimeCore is asked for the next `m` samples.
+    struct Piece {
+        double lag;      // beats behind now
+        int pattern;     // -1 none
+        double start;    // the pattern's start (a lap's, when it goes round a lap at a time)
+        int m;
+        bool changes;    // this piece asks a new lag (its crossfade starts at its first sample)
+    };
+
+    Piece pieceAt(int i, int n);
+    double baseLag(double q, double& until) const;     // the groove's lag, or none while it waits for a line
+    double grooveLag(double q, double& until) const;   // the groove's lag at q beats (5 ms on) and where it next changes
+    double resumeLine(double e, bool strict) const;
+    void setZone(double e, bool strict);
+
+    TimeCore core_;
+    Params p_;
+    double bpm_ = 120.0, bps_ = 120.0 / 60.0 / ef::kRate;   // the tempo; beats a sample
+    double tfb_ = 0.0;           // the crossfade (5 ms), in beats
+    double pos_ = 0.0;           // the song position of the next chunk's first sample
+    double qBase_ = 0.0;         // pos_ + the crossfade + the slack: where the chunk's first sample asks the groove
+    bool fresh_ = true;          // the next set() seeds the position from MPC's
+    double lastLag_ = 0.0;       // the lag asked in the last piece, in samples (a tempo change leaves it be): held while a pattern plays
+    int age_ = TimeCore::kFade;  // samples since the last change of lag started: below kFade it is still crossfading
+
+    // What ended a pattern: the groove waits (lag 0) from there to the next unit line.
+    bool armed_ = false;         // the last set() had a pattern
+    double armedEnd_ = 0.0;      // where it ends (HUGE_VAL looping)
+    bool armedStrict_ = false;   // it goes round by itself, so its end is a crossfade to live
+    bool zoneOn_ = false;
+    double zFrom_ = 0.0, zTo_ = 0.0;
+
+    int tail_ = 0;
 };
 
 } // namespace gf

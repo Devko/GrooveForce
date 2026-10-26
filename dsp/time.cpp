@@ -1,6 +1,8 @@
-// Time's engine: see time.h. The patterns themselves are surface/build/time_data.h.
+// Time: the engine (TimeCore) and the part with its grooves (Time): see time.h. The patterns themselves are surface/build/time_data.h.
 #include "time.h"
 
+#include "slew.h"
+#include "svf.h"   // clampParam
 #include "time_data.h"
 
 #include <algorithm>
@@ -35,9 +37,6 @@ void bindCurve(TimeCurve& c, int pattern, bool volume) {
     const TimePatternDef& d = defOf(pattern);
     c.bind(kTimePoints + (volume ? d.volFirst : d.srcFirst), volume ? d.volCount : d.srcCount);
 }
-
-// `v` moved toward `target` by at most `step`; it lands on the target exactly.
-float toward(float v, float target, float step) { return v < target ? std::min(v + step, target) : std::max(v - step, target); }
 
 // The level a head plays at for its speed: the looper's, a tape stop ends in silence.
 float speedGain(double speed) { return std::min(std::fabs(static_cast<float>(speed)) * 8.0f, 1.0f); }
@@ -360,6 +359,244 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     prevPos_ = carry;
     prevSpeed_ = h.speed;
     calm_ = h.lag0 == 0.0 && h.w == 0.0f && g_ == 1.0f && fade_ == 0;
+}
+
+
+// --- Time: the grooves ----------------------------------------------------------------------------
+
+namespace {
+
+constexpr double kSlack = 1e-3;                  // samples: a line this close after a sample counts as reached by it
+constexpr double kSixteenth = 0.25;              // Drunk's unit, in beats
+constexpr double kMsSamples = ef::kRate / 1000.0;
+constexpr double kUnitTolerance = 1e-6;          // in units: a pattern's end this close to a line is on it
+constexpr double kSmallStep = 0.4;               // frames: TimeCore moves the playhead by less than half a frame without a crossfade; so does Time
+
+// Drunk's lag for the 16th numbered k in its bar, 0..1 of the longest: a hash of the index, so it is the same on every
+// bar, every loop and every load (a seeded random, not a random).
+float drunkShare(int k) {
+    uint32_t x = static_cast<uint32_t>(k) * 0x9E3779B1u + 0x7F4A7C15u;
+    x ^= x >> 16;
+    x *= 0x7FEB352Du;
+    x ^= x >> 15;
+    x *= 0x846CA68Bu;
+    x ^= x >> 16;
+    return static_cast<float>(x >> 8) * (1.0f / 16777216.0f);
+}
+
+} // namespace
+
+Time::Time() = default;
+
+void Time::reset() {
+    core_.reset();
+    fresh_ = true;
+    lastLag_ = 0.0;
+    age_ = TimeCore::kFade;
+    armed_ = false;
+    zoneOn_ = false;
+    tail_ = 0;
+}
+
+// The groove's lag, in beats, for the sample whose position 5 ms on is q (so a change is asked for 5 ms before its
+// line and ends on it), and the position where it next changes (HUGE_VAL: never).
+double Time::grooveLag(double q, double& until) const {
+    until = HUGE_VAL;
+    switch (p_.groove) {
+    case kSwing: {
+        const double split = swingSplit(p_.swing);
+        if (split <= 0.0) return 0.0;   // straight
+        const double u = p_.swing.unitBeats;
+        const double unitNo = ef::floorFast(q / u);
+        if (!(std::fabs(unitNo) < kFar)) return 0.0;
+        until = (unitNo + 1.0) * u;
+        // the second unit of a pair (an odd unit) is the late one: the lag is how much later it starts than its straight line
+        return (static_cast<uint64_t>(static_cast<int64_t>(unitNo)) & 1u) ? split - u : 0.0;
+    }
+    case kDrunk: {
+        if (!(p_.amount > 0.0f)) return 0.0;
+        const double sixteenth = ef::floorFast(q / kSixteenth);
+        if (!(std::fabs(sixteenth) < kFar)) return 0.0;
+        until = (sixteenth + 1.0) * kSixteenth;
+        const int k = static_cast<int>(static_cast<uint64_t>(static_cast<int64_t>(sixteenth)) & 15u);   // its place in the bar
+        return static_cast<double>(drunkShare(k) * p_.amount * kDrunkMs) * kMsSamples * bps_;
+    }
+    case kPush:
+        return static_cast<double>(p_.amount * kPushMs) * kMsSamples * bps_;
+    default:
+        return 0.0;
+    }
+}
+
+// What is asked of the playhead when no pattern holds it: the groove, except while it waits for its next line after a
+// pattern (lag 0 on [zFrom_, zTo_)).
+double Time::baseLag(double q, double& until) const {
+    if (zoneOn_ && q >= zFrom_ && q < zTo_) {
+        until = zTo_;
+        return 0.0;
+    }
+    const double g = grooveLag(q, until);
+    if (zoneOn_ && q < zFrom_) until = std::min(until, zFrom_);
+    return g;
+}
+
+// Where the groove resumes after a pattern that ended at `e`: the first unit line at or after it (strictly after, for a
+// pattern whose end is a crossfade to the live input, not to the lag). A groove with no lines resumes at once.
+double Time::resumeLine(double e, bool strict) const {
+    double u = 0.0;
+    if (p_.groove == kSwing) {
+        if (swingSplit(p_.swing) > 0.0) u = p_.swing.unitBeats;
+    } else if (p_.groove == kDrunk) {
+        if (p_.amount > 0.0f) u = kSixteenth;
+    }
+    if (!(u > 0.0)) return e;
+    const double r = e / u;
+    if (!(std::fabs(r) < kFar)) return e;
+    return (strict ? ef::floorFast(r + kUnitTolerance) + 1.0 : std::ceil(r - kUnitTolerance)) * u;
+}
+
+void Time::setZone(double e, bool strict) {
+    const double r = resumeLine(e, strict);
+    zoneOn_ = r > e;
+    zFrom_ = e;
+    zTo_ = r;
+}
+
+void Time::set(const Params& in, const ef::Transport& t) {
+    p_ = in;
+    p_.groove = in.groove >= kOff && in.groove <= kPush ? in.groove : kOff;
+    p_.amount = ef::clampParam(in.amount, 0.0f, 1.0f, 0.5f);
+    p_.pattern = in.pattern >= 0 && in.pattern < numTimePatterns() && std::isfinite(in.patternStart) ? in.pattern : -1;
+
+    bpm_ = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    bps_ = bpm_ / 60.0 / ef::kRate;
+    tfb_ = TimeCore::kFade * bps_;
+    // Playing, the song position is MPC's (it moves for a locate, a loop, a tempo change). Otherwise it runs on at the
+    // tempo from where it was (process() moves it): from MPC's, the first chunk after reset(), if it says where.
+    if (t.valid && std::isfinite(t.beats) && (t.playing || fresh_)) pos_ = t.beats;
+    fresh_ = false;
+    qBase_ = pos_ + tfb_ + kSlack * bps_;
+
+    // Where a pattern ends, the groove waits for its next unit line. A pattern that is asked for says where it ends; one
+    // that is no longer asked for ended where it said it would, or where the asking stopped, if that came first.
+    double reach = 0.0;   // beats a pattern can still read back
+    if (p_.pattern >= 0) {
+        const TimePatternDef& d = timePatternDef(p_.pattern);
+        const bool wasLooping = armed_ && armedEnd_ == HUGE_VAL;
+        double end = HUGE_VAL;
+        if (!p_.loop) {
+            end = p_.patternStart + d.lengthBeats;
+            if (end + tfb_ > pos_) setZone(end, d.loopable);
+            else if (wasLooping) setZone(pos_, false);   // it was going round and is told to stop: it stops where it is
+        }
+        armed_ = true;
+        armedEnd_ = end;
+        armedStrict_ = d.loopable;
+        if (p_.loop || end + tfb_ > pos_) reach = kReachBeats;
+    } else if (armed_) {
+        armed_ = false;
+        const double e = std::min(armedEnd_, pos_);
+        setZone(e, armedStrict_ && armedEnd_ <= pos_);
+    }
+
+    // The tail: the groove's longest lag, or a pattern's reach back, and a crossfade.
+    double lag = 0.0;
+    switch (p_.groove) {
+    case kSwing: {
+        const double split = swingSplit(p_.swing);
+        if (split > 0.0) lag = split - p_.swing.unitBeats;
+        break;
+    }
+    case kDrunk: lag = static_cast<double>(p_.amount * kDrunkMs) * kMsSamples * bps_; break;
+    case kPush: lag = static_cast<double>(p_.amount * kPushMs) * kMsSamples * bps_; break;
+    default: break;
+    }
+    const double beats = std::max(lag, reach);
+    tail_ = beats > 0.0 && core_.allocated()
+                ? static_cast<int>(std::min(std::ceil(beats / bps_) + TimeCore::kFade, static_cast<double>(TimeCore::kRingFrames)))
+                : 0;
+}
+
+// The next piece of the chunk, from sample i of n: what to ask of the core, and for how many samples. A piece ends where
+// the ask changes: a unit line of the groove (5 ms early: q looks 5 ms on), the start or the end of a pattern or of one of
+// its laps, the end of the wait after a pattern.
+Time::Piece Time::pieceAt(int i, int n) {
+    const double q = qBase_ + i * bps_;
+    Piece pc{0.0, -1, 0.0, n - i, false};
+    double until = HUGE_VAL;
+    bool hold = false;   // a pattern has the playhead: the groove's lines are not followed
+
+    if (p_.pattern >= 0) {
+        const double start = p_.patternStart;
+        const TimePatternDef& d = timePatternDef(p_.pattern);
+        const double len = d.lengthBeats;
+        if (std::fabs(q - start) < kFar) {
+            if (q < start) {
+                until = start;   // not yet; TimeCore's pre-roll begins here
+            } else if (p_.loop) {
+                pc.pattern = p_.pattern;
+                pc.start = start;
+                hold = true;
+                if (!d.loopable) {   // it does not go round by itself: a lap at a time, each lap's pre-roll replacing the last's end
+                    pc.start = start + ef::floorFast((q - start) / len) * len;
+                    until = pc.start + len;
+                }
+            } else if (q < start + len) {
+                pc.pattern = p_.pattern;
+                pc.start = start;
+                hold = true;
+                until = start + len;
+            } else if (q < start + len + tfb_) {   // the end's crossfade, back to the lag the groove has from the line
+                pc.pattern = p_.pattern;
+                pc.start = start;
+                until = start + len + tfb_;
+            }
+        }
+    }
+
+    int room = n - i;   // samples this piece may take
+    if (hold) {
+        pc.lag = lastLag_ * bps_;
+    } else {
+        double next = HUGE_VAL;
+        pc.lag = baseLag(q, next);
+        until = std::min(until, next);
+        // A change of lag is a crossfade of 5 ms, and TimeCore cannot nest them: one asked while the last is still going
+        // (a knob, a groove switched, a pattern's end close behind) waits for its end. The groove's own lines are far
+        // enough apart (a unit is 15 ms at the fastest tempo) never to wait for each other.
+        if (std::fabs(pc.lag / bps_ - lastLag_) > kSmallStep) {   // (in samples: a tempo change moves the lag in beats, not in time)
+            if (age_ < TimeCore::kFade) {
+                pc.lag = lastLag_ * bps_;
+                room = std::min(room, TimeCore::kFade - age_);
+            } else {
+                pc.changes = true;
+            }
+        }
+    }
+
+    // The first sample at or after `until`, at least the next one.
+    const double x = (until - qBase_) / bps_;
+    int j = n;
+    if (x < n) j = x > i ? std::max(i + 1, static_cast<int>(std::ceil(x))) : i + 1;
+    pc.m = std::min(std::min(j, n) - i, room);
+    return pc;
+}
+
+void Time::process(float* L, float* R, int n) {
+    if (n <= 0) return;
+    ef::Transport t;   // the core is always told the position: this one's, which is MPC's while it plays
+    t.bpm = bpm_;
+    t.playing = t.valid = true;
+    for (int i = 0; i < n;) {
+        const Piece pc = pieceAt(i, n);
+        t.beats = pos_ + i * bps_;
+        core_.process(L + i, R + i, pc.m, t, pc.pattern, pc.start, pc.lag);
+        lastLag_ = pc.lag / bps_;
+        if (pc.changes) age_ = 0;
+        age_ = std::min(age_ + pc.m, static_cast<int>(TimeCore::kFade));
+        i += pc.m;
+    }
+    pos_ += n * bps_;
 }
 
 } // namespace gf
