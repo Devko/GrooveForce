@@ -127,6 +127,16 @@ const float kLowCut = onePoleStep(30.0f);                               // the l
 const double kGlide = 1.0 - std::exp(-kSeg / (0.060 * ef::kRate));      // Tape's step per segment
 const float kMinOct = std::log2(10.0f), kMaxOct = std::log2(0.45f * ef::kRate);   // the cutoff's range
 
+// R36: the loop never gains. The filter's gain is at most (1 - wet) + wet (wLP P + wBP + wHP P), where
+// w are the type weights (a blend of types peaks at no more than the weighted sum of their peaks) and P
+// = 1 / (k sqrt(1 - k^2 / 4)) is the low-pass's and the high-pass's peak at k = 1 / Q (1 up to Q = 0.7071,
+// where k is 1.4142: the Butterworth, exactly 1). What is fed back is scaled by 1 over that, never raised.
+float filterScale(const float* type, float k, float wet) {
+    const float p = k >= kInvQ0 ? 1.0f : std::max(1.0f, 1.0f / (k * std::sqrt(std::max(1.0f - 0.25f * k * k, 0.5f))));
+    const float peak = (1.0f - wet) + wet * ((type[EchoLine::kLP] + type[EchoLine::kHP]) * p + type[EchoLine::kBP]);
+    return 1.0f / std::max(1.0f, peak);
+}
+
 // Both lines read at their times: the taps at ages i - 1 .. i + 2, four samples in a row, through the
 // Hermite kernel. `w` is where the sample being read would be written.
 EF_INLINE Lr readLr(const float* bl, const float* br, int w, double teL, double teR) {
@@ -320,7 +330,10 @@ void EchoLine::filterTargets(ef::f2* t) const {
     t[M2] = ef::splat2(fType_[kLP] - fType_[kHP]);
     t[WET] = ef::splat2(fWet_);
     t[LOOP] = ef::splat2(fLoop_);
+    t[SCALE] = ef::splat2(filterScale(fType_, k, fWet_));
 }
+
+float EchoLine::loopScale() const { return fRunning_ ? gl_.cur()[SCALE][0] : 1.0f; }
 
 // The filter runs while it is on and while its wet share fades out; starting, its state is empty
 // (nothing was running) and its wet share fades in from 0.
@@ -526,7 +539,7 @@ void EchoLine::readRun(float* outL, float* outR, int w, int offset, int n) {
             const ef::SvfUpdate a = gliding ? ef::SvfUpdate::fast(v[G], v[K]) : settled;
             const Lr mix[3] = {v[M0], v[M1], v[M2]};
             y = r * (one - v[WET]) + s.tick(ef::safeIn(r), a, mix) * v[WET];   // exact at wet 0 and 1
-            src = r * (one - v[LOOP]) + y * v[LOOP];                            // the loop carries y In loop, r On output
+            src = r * (one - v[LOOP]) + y * (v[LOOP] * v[SCALE]);               // the loop carries y x scale In loop, r On output
         }
         ef::store2(outL + k, outR + k, y);
         back_[offset + k] = src;

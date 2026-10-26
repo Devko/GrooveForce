@@ -23,8 +23,19 @@
 // altogether while it is a low-pass at 20 kHz or above, so the defaults change nothing. Its cutoff
 // follows a modulator through cutoffModOct (octaves, added to the cutoff this chunk). The cutoff slews
 // at most 10 octaves in 10 ms, the controls a full scale in 10 ms, so nothing clicks when they move.
-// A resonant low-pass or high-pass has a gain over 1 at its cutoff, so with a high feedback In loop a
-// strong resonance builds a tone there, which the limiter keeps under 0 dBFS (the band-pass peaks at 1).
+//
+// The loop never gains (ruling R36). A resonant low-pass or high-pass boosts its cutoff by up to Q / sqrt(1 -
+// 1/(4 Q^2)) (12.01 at resonance 1; the band-pass peaks at 1, resonance 0 is a Butterworth at 1), and what
+// is heard keeps that boost, as any resonant filter has it. But everything that is fed back into a line is
+// scaled by loopScale(), 1 / max(1, the filter's peak gain at its present setting): the line's own feedback
+// In loop (the filtered read times the scale), and what the Echo's routings pass from line to line. So the
+// loop gain is at most the feedback at every frequency: silence in stays silence out, a feedback of 1 holds
+// a ring without growing it, a Ring of lines can't build up, and the repeats always die away (tailSamples()
+// is finite below a feedback of 1). A resonant peak is fed back at exactly the feedback; the rest of the
+// band falls away faster for it, the more resonant the filter is. On output the loop carries the plain read,
+// so the scale is 1 there for the line's own feedback; loopScale() is the filter's alone, for the Echo's
+// routings, which pass the (boosted) output. The scale glides with the filter's settings, a straight line
+// across each chunk, so it never steps.
 //
 // What is written always goes through a one-pole low cut at 30 Hz, whether it came in as input or as
 // feedback, so nothing builds up below the audible range, a DC offset never gets into the loop, and a
@@ -37,8 +48,8 @@
 // exactly linear. The limiter keeps what is written under 0 dBFS (instant attack, 100 ms release, after
 // a clamp at +-4 on the input and again in front of the low cut, so a wild input can't hold its gain down
 // for long, no sum can overflow, and the low cut can't push the limiter past +-8). NaN and infinity in the
-// input are silence. No stage has a gain over 1 but the filter's resonance, so
-// feedback 1 holds the repeats and never runs away; drive 1 makes them fade slowly as it squares them off.
+// input are silence. No stage in the loop has a gain over 1 (R36 above), so feedback 1 holds the repeats
+// and never runs away; drive 1 makes them fade slowly as it squares them off.
 // A tiny constant (1e-18, -360 dB) rides under what is written, so nothing in the loop decays into
 // denormals.
 //
@@ -66,9 +77,12 @@
 // time. Reads are cubic (4-point Hermite): linear interpolation would dull the repeats more wherever the
 // wow puts them between samples.
 //
-// Memory: the lines are allocated by allocate() (the UI thread; 2 x 530 KB), not the constructor. Until
-// then read() gives silence and write() does nothing, and set() only keeps the parameters. reset() is
-// cheap (the rack calls it on the audio thread when a part comes back on): the lines aren't cleared.
+// Memory: the lines are allocated by allocate() (the UI thread; 2 x 530 KB), not the constructor, and
+// allocate() calls reset(). It is not safe against the audio thread: the audio thread may only touch a
+// line allocate() has returned from. The Echo hands its lines over through an atomic pointer to the whole
+// line, set after allocate() returns; allocated() is not a hand-over and must never be used as one. Until
+// allocate(), read() gives silence and write() does nothing, and set() only keeps the parameters. reset()
+// is cheap (the rack calls it on the audio thread when a part comes back on): the lines aren't cleared.
 // Until they have been written all the way round, each run of samples first zeroes the few old samples
 // its taps can reach, so nothing from before ever comes out.
 #include "common.h"
@@ -109,8 +123,9 @@ public:
     };
 
     EchoLine();                          // no allocation
-    bool allocate();                     // UI thread: 3 s + wow per side; false if out of memory
-    bool allocated() const { return !lineR_.empty(); }
+    // UI thread only, before the audio thread has the line: 3 s + wow per side; false if out of memory.
+    bool allocate();
+    bool allocated() const { return !lineR_.empty(); }   // not a hand-over (see Memory above)
     void reset();
     void set(const Params& p, const ef::Transport& t);
     // Phase 1: the line's output for the next n samples (n <= kChunk), read from what was written >= 1 ms ago.
@@ -119,19 +134,26 @@ public:
     // read) inside. The input may be the buffers read() filled (a Ring of one line).
     void write(const float* inL, const float* inR, int n);
     int tailSamples() const { return tail_; }
+    // R36: the gain every signal fed back into a line (its own feedback, and what the Echo routes from this
+    // line to another) is scaled by: 1 / max(1, the filter's peak gain), where the filter is. 1 for the
+    // band-pass, at resonance 0 and with the filter bypassed. What the last read() ended at; the Echo
+    // ramps its routed gain from the last chunk's value to this one's, as the line does for its own.
+    float loopScale() const;
 
+    // For tests only (the audio thread has no use for them):
     // The delay time in samples, without the wow: Tape's glided time; in Fade the head being read (the
     // old one until a fade ends).
     double timeSamples() const { return t_; }
-    // The largest magnitude the lines hold (a scan of both, for tests): the limiter keeps it at 1. Infinity if
+    // The largest magnitude the lines hold (a scan of both): the limiter keeps it at 1. Infinity if
     // anything in them is not a number.
     float peakStored() const;
 
 private:
     // The write side's values that move in straight lines across a chunk.
     enum : int { FB, DRIVE, MONO_IN, CROSS, R_IN, kRamps };
-    // What glides in the filter: g (L and R, in octaves), 1 / Q, the output mix, the wet and loop shares.
-    enum : int { G, K, M0, M1, M2, WET, LOOP, kValues };
+    // What glides in the filter: g (L and R, in octaves), 1 / Q, the output mix, the wet and loop shares,
+    // and the loop's scale (R36).
+    enum : int { G, K, M0, M1, M2, WET, LOOP, SCALE, kValues };
 
     void segment();
     void wowNow(double t, float& l, float& r) const;
