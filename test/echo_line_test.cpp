@@ -2,7 +2,9 @@
 // several tempos, with the modulator's factor) and as big as the 30 Hz low cut leaves them, the
 // feedback ratio and how a feedback of 1 holds, the filter In loop (each repeat filtered again) and On
 // output (every repeat through it once), Ping-Pong, Mono and Stereo, Tape bending and Fade not,
-// the drive and the limiter keeping what is written under 0 dBFS, a line wired to itself giving the same
+// the drive and the limiter keeping what is written under 0 dBFS, the loop never gaining however resonant
+// the filter (R36: silence stays silent, a feedback of 1 holds a ring and doesn't grow it, what is heard is
+// the stored signal through the filter's peak), a line wired to itself (times loopScale()) giving the same
 // as feedback inside, reset leaving nothing from before, NaN never getting into the loop. Then the
 // contract: the lines come only with allocate(), reads do not depend on the chunk size, controls move
 // without a click, the extremes, the tail.
@@ -257,6 +259,14 @@ double repeatDb(const Buf& y, int n, int T, int len, double hz) {
 double butter(double hz, double fc) {
     const double r = std::tan(kPi * hz / ef::kRate) / std::tan(kPi * fc / ef::kRate);
     return 1.0 / std::sqrt(1.0 + r * r * r * r);
+}
+
+// The SVF's Q at a resonance (0.7071 .. 12, evenly in octaves of Q) and the peak gain of its low-pass and high-pass at it
+// (Q / sqrt(1 - 1/(4 Q^2)); the band-pass peaks at 1).
+double qOf(double res) { return 0.70710678 * std::pow(12.0 / 0.70710678, res); }
+double peakOf(double res) {
+    const double q = qOf(res);
+    return q > 0.70710678 ? q / std::sqrt(1.0 - 0.25 / (q * q)) : 1.0;
 }
 
 void lineInLoop() {      // LP 1 kHz in the loop: a 4 kHz tone loses ≥ 12 dB more per repeat than a 250 Hz one; On output: every repeat the same
@@ -529,19 +539,24 @@ void lineDriveBounded() {// drive 1, feedback 1, a full-scale square for 20 s: e
         p.mode = c.mode;
         p.wow = c.wow;
         e.reset();
-        bool ok = true;
+        bool ok = true, bounded = true;
         Buf L(static_cast<size_t>(kSr)), R(static_cast<size_t>(kSr));
         float loudestOut = 0.0f;
+        // What is heard is what is stored (3 s of it are in the lines) through the filter's peak gain and the
+        // Hermite kernel's overshoot between samples: 1.3 covers that.
+        const double gain = 1.3 * (c.filterType == EchoLine::kBP ? 1.0 : peakOf(c.resonance));
         for (int s = 0; s < seconds; ++s) {
             const float* in = sq.data() + static_cast<size_t>(s) * kSr;
             runLine(e, p, in, in, L.data(), R.data(), kSr);
             // The lines hold 3 s: looking every second sees every write.
-            ok = ok && allFinite(L) && allFinite(R) && e.peakStored() <= 1.00001f;
+            const double stored = e.peakStored();
+            ok = ok && allFinite(L) && allFinite(R) && stored <= 1.00001;
+            bounded = bounded && peak(L) <= gain * stored && peak(R) <= gain * stored;
             loudestOut = std::max({loudestOut, peak(L), peak(R)});
         }
-        if (!ok || loudestOut > 30.0f) std::printf("  %s: stored peak %g, out %g\n", c.name, static_cast<double>(e.peakStored()), static_cast<double>(loudestOut));
+        if (!ok || !bounded) std::printf("  %s: stored peak %g, out %g\n", c.name, static_cast<double>(e.peakStored()), static_cast<double>(loudestOut));
         CHECK(ok);
-        CHECK(loudestOut < 30.0f);
+        CHECK(bounded);
         if (c.resonance == 0.0f && c.wow == 0.0f) CHECK(loudestOut <= 1.00001f);   // whole-sample reads of what was written
     }
 }
@@ -612,14 +627,19 @@ void lineReadWrite() {   // a line whose input is its own read (Ring of one) at 
     const int n = 32 * 6900;   // whole chunks, about 5 s
     const Buf seed = concat(whiteNoise(kSr / 2, 0.5f, 21), silence(n - kSr / 2));
     struct Case {
-        float g, cutoff, resonance;
+        float g;
+        int type;
+        float cutoff, resonance;
     };
-    // Feedback 0.9 and 1 with the filter off and on (a Butterworth: no gain over 1, so 1 holds), and a
-    // resonant one with a feedback that keeps its peak under 1.
-    for (const Case& c : {Case{0.9f, 20000.0f, 0.0f}, Case{1.0f, 20000.0f, 0.0f}, Case{0.9f, 3000.0f, 0.0f}, Case{1.0f, 3000.0f, 0.0f},
-                          Case{0.5f, 3000.0f, 0.3f}}) {
+    // R36: what is fed back is scaled by loopScale(), so the wire carries the read times that scale, and then a
+    // Ring of one is the same as feedback inside whatever the filter: off, a Butterworth (scale 1), resonant.
+    // Feedback 0.9 and 1 are stable all the way up to resonance 1.
+    const Case cases[] = {{0.9f, EchoLine::kLP, 20000.0f, 0.0f}, {1.0f, EchoLine::kLP, 20000.0f, 0.0f}, {0.9f, EchoLine::kLP, 3000.0f, 0.0f},
+                          {1.0f, EchoLine::kLP, 3000.0f, 0.0f},  {1.0f, EchoLine::kLP, 3000.0f, 0.3f},  {1.0f, EchoLine::kLP, 800.0f, 1.0f},
+                          {0.9f, EchoLine::kHP, 2000.0f, 1.0f},  {1.0f, EchoLine::kBP, 1000.0f, 1.0f}};
+    for (const Case& c : cases) {
         P p = plain(1.0f);
-        p.filterType = EchoLine::kLP;
+        p.filterType = c.type;
         p.cutoffHz = c.cutoff;
         p.resonance = c.resonance;
         p.drive = 0.2f;
@@ -630,22 +650,121 @@ void lineReadWrite() {   // a line whose input is its own read (Ring of one) at 
         wired.reset();
         Buf A, B;
         runLine(inside, fb, seed, seed, A, B);
-        // The wire: each chunk's input is the seed plus g x what the same chunk's read just gave.
+        // The wire: each chunk's input is the seed plus g x (what the same chunk's read just gave x the scale).
         Buf C(static_cast<size_t>(n)), D(static_cast<size_t>(n));
         Buf wireL(static_cast<size_t>(ef::kChunk)), wireR(static_cast<size_t>(ef::kChunk));
         for (size_t pos = 0; pos < static_cast<size_t>(n); pos += ef::kChunk) {
             wired.set(p, {});
             wired.read(&C[pos], &D[pos], ef::kChunk);
+            const float scale = wired.loopScale();
             for (size_t k = 0; k < static_cast<size_t>(ef::kChunk); ++k) {
-                wireL[k] = seed[pos + k] + c.g * C[pos + k];
-                wireR[k] = seed[pos + k] + c.g * D[pos + k];
+                wireL[k] = seed[pos + k] + c.g * (C[pos + k] * scale);
+                wireR[k] = seed[pos + k] + c.g * (D[pos + k] * scale);
             }
             wired.write(wireL.data(), wireR.data(), ef::kChunk);
         }
-        const double d = std::max(maxDiff(A, C), maxDiff(B, D));
-        if (d > 1e-6) std::printf("  ring of one, feedback %g, cutoff %g: differs by %g\n", static_cast<double>(c.g), static_cast<double>(c.cutoff), d);
-        CHECK(d < 1e-6);
+        // The same arithmetic in a different order (the device's compiler fuses multiplies into adds): a few float
+        // roundings of the loudest thing heard (up to 12 times what is stored), which a loop at gain 1 keeps for 5 s.
+        const double d = std::max(maxDiff(A, C), maxDiff(B, D)), tol = 1e-5 * std::max(1.0, static_cast<double>(peak(A)));
+        if (d > tol) std::printf("  ring of one, feedback %g, type %d, cutoff %g, resonance %g: differs by %g (peak %g)\n", static_cast<double>(c.g), c.type, static_cast<double>(c.cutoff), static_cast<double>(c.resonance), d, static_cast<double>(peak(A)));
+        CHECK(d <= tol);
         CHECK(allFinite(C) && wired.peakStored() <= 1.00001f && inside.peakStored() <= 1.00001f);
+    }
+}
+
+void lineLoopScale() {   // R36: the scale is 1 / the filter's peak gain; In loop the feedback has it, On output the feedback doesn't
+    Line e;
+    const auto scaleOf = [&](int type, float cutoff, float res, int place) {
+        P p = plain(100.0f);
+        p.filterType = type;
+        p.cutoffHz = cutoff;
+        p.resonance = res;
+        p.place = place;
+        e.reset();
+        const Buf z = silence(512);
+        Buf L, R;
+        runLine(e, p, z, z, L, R);
+        return e.loopScale();
+    };
+    // Exactly 1 where the filter doesn't boost: bypassed, a Butterworth, the band-pass at any resonance.
+    CHECK(scaleOf(EchoLine::kLP, 20000.0f, 1.0f, EchoLine::kInLoop) == 1.0f);   // bypassed
+    CHECK(scaleOf(EchoLine::kLP, 1000.0f, 0.0f, EchoLine::kInLoop) == 1.0f);
+    CHECK(scaleOf(EchoLine::kHP, 1000.0f, 0.0f, EchoLine::kInLoop) == 1.0f);
+    CHECK(scaleOf(EchoLine::kBP, 1000.0f, 0.0f, EchoLine::kInLoop) == 1.0f);
+    CHECK(scaleOf(EchoLine::kBP, 1000.0f, 1.0f, EchoLine::kInLoop) == 1.0f);
+    // The low-pass and the high-pass at their peaks: Q / sqrt(1 - 1/(4 Q^2)).
+    for (float res : {0.25f, 0.5f, 0.75f, 1.0f}) {
+        const double want = 1.0 / peakOf(res);
+        CHECK(near(scaleOf(EchoLine::kLP, 1000.0f, res, EchoLine::kInLoop), want, 1e-4 * want));
+        CHECK(near(scaleOf(EchoLine::kHP, 3000.0f, res, EchoLine::kInLoop), want, 1e-4 * want));
+    }
+    // It is the filter's, for the routings: On output it is the same (the output is boosted either way).
+    CHECK(near(scaleOf(EchoLine::kLP, 1000.0f, 1.0f, EchoLine::kOnOutput), 1.0 / peakOf(1.0), 1e-4));
+    // Before the line has run (or reset) it is 1.
+    e.reset();
+    CHECK(e.loopScale() == 1.0f);
+
+    // It glides: resonance 0 -> 1 at once, the scale chunk by chunk falls from 1 to 1/12 with no step. With the
+    // filter on the resonance slews (a full scale in 10 ms) and the scale falls by a fifth a chunk at most. With the
+    // filter coming on from bypassed the wet share fades in over 10 ms, and the scale with it, the steepest in the first
+    // chunk (the wet share's first step): 1 to 0.55 in 32 samples, which is under a full scale per millisecond.
+    for (int bypassed = 0; bypassed < 2; ++bypassed) {
+        P p = plain(100.0f);
+        p.cutoffHz = bypassed ? 20000.0f : 800.0f;
+        e.reset();
+        const Buf z = silence(32);
+        Buf L, R;
+        runLine(e, p, z, z, L, R);
+        CHECK(e.loopScale() == 1.0f);
+        p.cutoffHz = 800.0f;
+        p.resonance = 1.0f;
+        float last = 1.0f, worstRatio = 1.0f, worstDrop = 0.0f;
+        bool falling = true;
+        for (int chunk = 0; chunk < 40; ++chunk) {
+            runLine(e, p, z, z, L, R);
+            const float now = e.loopScale();
+            worstRatio = std::min(worstRatio, now / last);
+            worstDrop = std::max(worstDrop, last - now);
+            falling = falling && now <= last;
+            last = now;
+        }
+        CHECK(falling && worstDrop <= ef::kChunk / (0.001 * ef::kRate));   // no edge steeper than a full scale in 1 ms
+        if (!bypassed) CHECK(worstRatio >= 0.8f);
+        CHECK(near(last, 1.0 / peakOf(1.0), 1e-4));
+    }
+
+    // In loop the feedback has the scale, On output it hasn't. A 250 Hz tone in the low-pass's passband (1 kHz, Q 12:
+    // gain 1.07 there) falls away 6.02 dB a repeat On output, and In loop that and the scale's 21.6 dB less the gain a pass;
+    // the 1 kHz tone at the peak (+21.6 dB heard) is fed back at the feedback alone: 6.02 dB a repeat, either way.
+    {
+        const int T = 17640, len = 8820;   // 400 ms; 200 ms bursts: narrow against the filter's 83 Hz
+        P p = plain(400.0f);
+        p.feedback = 0.5f;
+        p.filterType = EchoLine::kLP;
+        p.cutoffHz = 1000.0f;
+        p.resonance = 1.0f;
+        const double passband = db(1.0 / std::sqrt(std::pow(1.0 - std::pow(std::tan(kPi * 250.0 / kSr) / std::tan(kPi * 1000.0 / kSr), 2.0), 2.0) +
+                                                    std::pow(std::tan(kPi * 250.0 / kSr) / std::tan(kPi * 1000.0 / kSr) / qOf(1.0), 2.0)));
+        for (int place = 0; place < 2; ++place) {
+            p.place = place ? EchoLine::kOnOutput : EchoLine::kInLoop;
+            double drops[2];
+            double first[2];
+            int i = 0;
+            for (double hz : {250.0, 1000.0}) {
+                const Buf in = concat(burst(hz, len, 0.5f), silence(4 * T));
+                Buf L, R;
+                e.reset();
+                runLine(e, p, in, in, L, R);
+                const double r1 = repeatDb(L, 1, T, len, hz), r2 = repeatDb(L, 2, T, len, hz);
+                first[i] = r1;
+                drops[i++] = r1 - r2;
+            }
+            CHECK(near(first[0], passband, 0.3));                  // heard: the filter's gain, in either place
+            CHECK(first[1] > 18.0);                                // and its peak: +21.6 dB less the burst's width
+            CHECK(near(drops[1], 6.02, 0.5));                      // the peak: the feedback alone
+            if (place == 0) CHECK(near(drops[0], 6.02 + db(peakOf(1.0)) - passband, 0.4));   // In loop: the passband loses the scale too
+            else CHECK(near(drops[0], 6.02, 0.3));                 // On output: the plain read, the feedback alone
+        }
     }
 }
 
@@ -740,6 +859,100 @@ void lineNan() {         // NaN in the input: finite output, the loop never take
     }
 }
 
+void lineSilence() {     // R36: the loop never gains. Silence in is silence out, however resonant the filter and however high the feedback
+    Line e;
+    const int n = 30 * kSr;
+    const Buf zero = silence(n);
+    struct Case {
+        int type;
+        float cutoff;
+    };
+    // Low-pass and high-pass at resonance 1 (Q 12), feedback 0.5 and 1, at 1 ms and at 100 ms; the band-pass too.
+    for (const Case& c : {Case{EchoLine::kLP, 800.0f}, Case{EchoLine::kHP, 3000.0f}, Case{EchoLine::kBP, 1000.0f}}) {
+        for (float fb : {0.5f, 1.0f}) {
+            for (float ms : {1.0f, 100.0f}) {
+                P p = plain(ms);
+                p.feedback = fb;
+                p.filterType = c.type;
+                p.cutoffHz = c.cutoff;
+                p.resonance = 1.0f;
+                e.reset();
+                Buf L, R;
+                runLine(e, p, zero, zero, L, R);
+                const float loudest = std::max(peak(L), peak(R));
+                if (!(loudest < 1e-12f)) std::printf("  type %d, feedback %g, %g ms: %g from silence\n", c.type, static_cast<double>(fb), static_cast<double>(ms), static_cast<double>(loudest));
+                CHECK(loudest < 1e-12f);
+            }
+        }
+    }
+    // And at other cutoffs, the sharpest loop there is: 1 ms, feedback 1.
+    for (int type : {EchoLine::kLP, EchoLine::kHP}) {
+        for (float cutoff : {60.0f, 200.0f, 1000.0f, 5000.0f, 15000.0f}) {
+            P p = plain(1.0f);
+            p.feedback = 1.0f;
+            p.filterType = type;
+            p.cutoffHz = cutoff;
+            p.resonance = 1.0f;
+            e.reset();
+            Buf L, R;
+            runLine(e, p, silence(5 * kSr), silence(5 * kSr), L, R);
+            CHECK(std::max(peak(L), peak(R)) < 1e-12f);
+        }
+    }
+}
+
+void lineHold() {        // R36: feedback 1 and resonance 1: after a noise burst the ring neither grows nor runs away for 60 s
+    Line e;
+    const int burstLen = kSr / 2, lap = 4410;
+    const Buf burst = whiteNoise(burstLen, 0.02f, 31);
+    for (int type : {EchoLine::kLP, EchoLine::kHP, EchoLine::kBP}) {
+        P p = plain(100.0f);
+        p.feedback = 1.0f;
+        p.filterType = type;
+        p.cutoffHz = 1000.0f;
+        p.resonance = 1.0f;
+        const Buf in = concat(burst, silence(60 * kSr - burstLen));
+        Buf L, R;
+        e.reset();
+        runLine(e, p, in, in, L, R);
+        const double early = rms(L, 5 * kSr, 15 * kSr), late = rms(L, 50 * kSr, 60 * kSr);
+        // A loop that never gains holds at most the energy the burst put in: a lap of it at most, so its rms is
+        // at most sqrt(burst / lap) times the burst's; heard through the filter's peak, 1.1 for slack.
+        const double most = 1.1 * (type == EchoLine::kBP ? 1.0 : peakOf(1.0)) * std::sqrt(static_cast<double>(burstLen) / lap) * rms(burst);
+        if (!(late <= 1.02 * early && late <= most)) std::printf("  type %d: rms %g early, %g late, at most %g\n", type, early, late, most);
+        CHECK(allFinite(L) && e.peakStored() <= 1.00001f);
+        CHECK(early > 0.0);
+        CHECK(late <= 1.02 * early);                       // no growth
+        CHECK(late <= most && early <= most);              // and nothing from nothing
+        CHECK(peak(L) <= 1.3 * peakOf(1.0) * 1.00001);     // heard: what is stored through the filter's peak
+    }
+    // And with a cutoff the modulator keeps moving (3 Hz, +-2 octaves): a moving resonance must not pump energy in either.
+    for (int type : {EchoLine::kLP, EchoLine::kHP}) {
+        for (float ms : {1.0f, 100.0f}) {
+            P p = plain(ms);
+            p.feedback = 1.0f;
+            p.filterType = type;
+            p.cutoffHz = 1000.0f;
+            p.resonance = 1.0f;
+            const size_t n = static_cast<size_t>(20 * kSr);
+            const Buf in = concat(burst, silence(static_cast<int>(n) - burstLen));
+            Buf L(n), R(n);
+            e.reset();
+            for (size_t pos = 0; pos < n; pos += ef::kChunk) {
+                p.cutoffModOct = static_cast<float>(2.0 * std::sin(2.0 * kPi * 3.0 * static_cast<double>(pos) / kSr));
+                e.set(p, {});
+                e.read(&L[pos], &R[pos], static_cast<int>(std::min<size_t>(ef::kChunk, n - pos)));
+                e.write(&in[pos], &in[pos], static_cast<int>(std::min<size_t>(ef::kChunk, n - pos)));
+            }
+            const double most = 1.1 * peakOf(1.0) * std::sqrt(static_cast<double>(burstLen) / (ms * 44.1)) * rms(burst);
+            const double late = rms(L, 15 * kSr, 20 * kSr);
+            if (!(late <= most)) std::printf("  moving cutoff, type %d, %g ms: rms %g late, at most %g\n", type, static_cast<double>(ms), late, most);
+            CHECK(allFinite(L) && e.peakStored() <= 1.00001f);
+            CHECK(late <= most);
+        }
+    }
+}
+
 void lineDivisions() {   // the sync divisions: sorted, EffectForce's 16 and the three odd ones
     CHECK(gf::kNumEchoDivs == 19);
     for (int i = 1; i < gf::kNumEchoDivs; ++i) CHECK(gf::kEchoDivs[i].beats > gf::kEchoDivs[i - 1].beats);
@@ -806,8 +1019,14 @@ void lineChunks() {      // what comes out does not depend on how the chunks are
     b.wow = 1.0f;
     b.filterType = EchoLine::kLP;
     b.cutoffHz = 5000.0f;
+    // A resonant loop: the scale glides with the filter, and that must not depend on the cutting either.
+    P c = plain(60.0f);
+    c.feedback = 0.9f;
+    c.filterType = EchoLine::kLP;
+    c.cutoffHz = 900.0f;
+    c.resonance = 0.8f;
     const Buf in = whiteNoise(2 * kSr, 0.5f, 4);
-    for (const P& p : {a, b}) {
+    for (const P& p : {a, b, c}) {
         Line ref;
         Buf rl, rr;
         runLine(ref, p, in, in, rl, rr);
@@ -923,7 +1142,7 @@ void lineExtremes() {    // any parameters, any input: finite, the lines under 0
         ok = ok && e.tailSamples() >= 0;
     }
     CHECK(ok);
-    CHECK(loudestOut < 100.0f);
+    CHECK(loudestOut <= 1.3 * peakOf(1.0));   // the stored 1, through the sharpest filter's peak and the Hermite kernel
     CHECK(e.peakStored() <= 1.00001f);
 }
 
@@ -948,6 +1167,31 @@ void lineTail() {        // the tail: silence after it, 1 for ever at feedback 1
         CHECK(peak(L, tail, L.size()) < 2e-3f);
         CHECK(peak(L, 0, tail) > 0.01f);
     }
+    // A resonant filter In loop (R36): the loop gain at the peak is the feedback, so the repeats still die away
+    // and the tail covers them, ring and all: 60 dB down and more after it. Short lines, slow rings, feedbacks up to .99.
+    struct Case {
+        int type;
+        float cutoff, ms, fb;
+    };
+    for (const Case& c : {Case{EchoLine::kLP, 300.0f, 50.0f, 0.5f}, Case{EchoLine::kLP, 300.0f, 50.0f, 0.9f}, Case{EchoLine::kHP, 2000.0f, 50.0f, 0.5f},
+                          Case{EchoLine::kHP, 2000.0f, 50.0f, 0.9f}, Case{EchoLine::kLP, 60.0f, 10.0f, 0.5f},  Case{EchoLine::kHP, 8000.0f, 1.0f, 0.99f},
+                          Case{EchoLine::kBP, 700.0f, 100.0f, 0.8f}}) {
+        P p = plain(c.ms);
+        p.feedback = c.fb;
+        p.filterType = c.type;
+        p.cutoffHz = c.cutoff;
+        p.resonance = 1.0f;
+        e.reset();
+        e.set(p, {});
+        const size_t tail = static_cast<size_t>(e.tailSamples());
+        CHECK(tail > 2205 && tail < 40 * static_cast<size_t>(kSr));
+        const Buf in = impulseAt(static_cast<int>(tail) + 4 * kSr, 0);
+        Buf L, R;
+        runLine(e, p, in, in, L, R);
+        const float before = peak(L, 0, tail), after = peak(L, tail, L.size());
+        if (!(after < 2e-3f * before)) std::printf("  type %d, %g Hz, %g ms, feedback %g: %g after the tail (%zu samples), %g before\n", c.type, static_cast<double>(c.cutoff), static_cast<double>(c.ms), static_cast<double>(c.fb), static_cast<double>(after), tail, static_cast<double>(before));
+        CHECK(before > 0.0f && after < 2e-3f * before);
+    }
     // Long after the tail the line holds nothing but its tiny offset (-360 dB): nothing decays into denormals.
     {
         P q = plain(100.0f);
@@ -969,6 +1213,13 @@ void lineTail() {        // the tail: silence after it, 1 for ever at feedback 1
     p.feedback = 0.0f;
     e.set(p, {});
     CHECK(e.tailSamples() >= 4410 && e.tailSamples() < kSr);
+    // Below 1 it is finite whatever the setting (R36: below 1 the repeats always die away).
+    p.feedback = 0.9999f;
+    p.filterType = EchoLine::kLP;
+    p.cutoffHz = 20.0f;
+    p.resonance = 1.0f;
+    e.set(p, {});
+    CHECK(e.tailSamples() > kSr && e.tailSamples() < (1 << 30));
 }
 
 } // namespace
@@ -992,6 +1243,9 @@ void echoLineTests() {
     lineMoves();
     lineExtremes();
     lineTail();
+    lineSilence();
+    lineHold();
+    lineLoopScale();
 }
 
 // make test-module M=echo_line builds with -DMODULE_TESTS=<M>Tests, i.e. echo_lineTests; the suite
