@@ -37,6 +37,17 @@
 // Parameters out of range are the nearest value, a mode or number that isn't one the default, and a
 // position that isn't a number is not a position (the LFO runs on).
 //
+// One detector and one follower for all the lines (ruling R41). Every Env hears the same key at the
+// same sensitivity, so four of them would find the same hits four times, and four followers would
+// follow the same level. The Echo therefore runs one TransientDetector and one KeyFollower (below) over
+// the key per chunk, and gives each line's modulator what they found: nextShared(p, t, n, onset, level)
+// is next() with the onset (the offset in the chunk of the detector's first onset, or -1) and the follower's
+// level instead of the key; it does the same as next() would have with a detector and a follower of its
+// own fed the same key, bit for bit (checked in the tests), and each line's Env still falls at its own
+// rate and warms up for 60 ms after its own reset() or pick. The shared detector is the Echo's to keep
+// running (no reset while audio runs) and its sensitivity is the Echo's: Params::sensitivity is read by
+// next() only.
+//
 // Header only, no allocation, nothing that locks: the audio thread can call next() on any chunk.
 #include "common.h"
 #include "grid.h"
@@ -50,6 +61,41 @@
 
 namespace gf {
 
+// EffectForce's EnvFollower: the peak of the two sides, one pole up in 5 ms and down in 150 ms. process() takes
+// n samples of the key (null is not allowed: the caller gives silence) and returns the level at the chunk's end;
+// NaN and infinity are silence. On NEON in a vector's lanes: VFP has no min or max, and its compares stall on
+// the flags.
+class KeyFollower {
+public:
+    void reset() { level_ = 0.0f; }
+    float process(const float* L, const float* R, int n) {
+#if EF_NEON
+        float32x2_t e = vdup_n_f32(level_);
+        const float32x2_t att = vdup_n_f32(att_), rel = vdup_n_f32(rel_), big = vdup_n_f32(FLT_MAX);
+        for (int i = 0; i < n; ++i) {
+            float32x2_t v = vld1_lane_f32(R + i, vld1_dup_f32(L + i), 1);
+            v = vreinterpret_f32_u32(vand_u32(vreinterpret_u32_f32(v), vcale_f32(v, big)));   // sanitize()
+            v = vabs_f32(v);
+            const float32x2_t x = vpmax_f32(v, v);
+            e = vfma_f32(e, vsub_f32(x, e), vbsl_f32(vcgt_f32(x, e), att, rel));   // fused, as GCC builds the VFP version
+        }
+        const float last = vget_lane_f32(e, 0);
+#else
+        float last = level_;
+        for (int i = 0; i < n; ++i) {
+            const float x = std::max(std::fabs(ef::sanitize(L[i])), std::fabs(ef::sanitize(R[i])));
+            last += (x - last) * (x > last ? att_ : rel_);
+        }
+#endif
+        level_ = last < 1e-9f ? 0.0f : last;   // no denormals while it decays
+        return level_;
+    }
+
+private:
+    float level_ = 0.0f;
+    float att_ = ef::smoothCoef(5e-3f), rel_ = ef::smoothCoef(150e-3f);
+};
+
 class EchoMod {
 public:
     enum Mode : int { kOff, kLfo, kEnv, kFollow };
@@ -58,7 +104,7 @@ public:
         int mode = kOff;
         int shape = 0;             // LFO: the library's, gf::shapeName
         double rateBeats = 1.0;    // LFO: the cycle, Env: the fall to -60 dB; 0.0625 .. 64 beats
-        float sensitivity = 0.5f;  // Env: the detector's, 0..1
+        float sensitivity = 0.5f;  // Env: the detector's, 0..1 (next() only: nextShared() hears the Echo's detector)
         Swing swing;               // set by the chain
     };
 
@@ -69,6 +115,7 @@ public:
     // Everything forgotten: the position starts at 0, the next set of parameters starts from nothing.
     void reset() {
         det_.reset();
+        fol_.reset();
         pos_ = 0.0;
         env_ = 0.0f;
         mode_ = kOff;
@@ -78,6 +125,29 @@ public:
     // One value 0..1 for the chunk of n samples starting now. key: the chain's input (R26), for Env
     // and Follow.
     float next(const Params& p, const ef::Transport& t, const float* keyL, const float* keyR, int n) {
+        return step(p, t, n, keyL, keyR, false, -1, 0.0f);
+    }
+
+    // The same for a modulator whose detector and follower are the Echo's (R41): onset is the offset in the
+    // chunk of the shared detector's first onset in the key, or -1 (TransientDetector::process()); level the
+    // shared KeyFollower's level at the chunk's end (KeyFollower::process()). Both are only used by the mode
+    // that needs them, but the Echo's detector and follower must have run on this chunk's key whenever any
+    // line is in Env or Follow.
+    float nextShared(const Params& p, const ef::Transport& t, int n, int onset, float level) {
+        return step(p, t, n, nullptr, nullptr, true, onset, level);
+    }
+
+private:
+    static constexpr int kWarmup = static_cast<int>(0.060f * ef::kRate);   // as Pump's detector
+    static constexpr float kLog2Thousand = 9.96578428f;                    // 60 dB is 10^-3
+    static constexpr float kFollowGain = 2.14f;                            // see the header
+    static constexpr float kTiny = 1e-6f;                                  // -120 dB: the envelope is over
+
+    static double rateOf(double rate) {
+        return rate >= kMinRateBeats ? std::min(rate, kMaxRateBeats) : (rate < kMinRateBeats ? kMinRateBeats : 1.0);
+    }
+
+    float step(const Params& p, const ef::Transport& t, int n, const float* keyL, const float* keyR, bool shared, int onset, float level) {
         n = std::clamp(n, 1, ef::kChunk);
         // Playing, the song position is MPC's (it moves for a locate, a loop, a tempo change). Otherwise
         // it runs on at the tempo from where it was.
@@ -91,26 +161,27 @@ public:
         if (mode == kOff) return 0.0f;
         if (mode == kLfo) return lfo(p, start);
 
+        if (shared) {
+            if (mode == kEnv) return env(p, bpm, onset >= 0 && onset < n ? onset : -1, n);
+            return std::min((level >= 0.0f ? level : 0.0f) * kFollowGain, 1.0f);   // (a NaN is 0)
+        }
         // The key: null is silence.
         static const float silence[ef::kChunk] = {};
         const float* L = keyL ? keyL : silence;
         const float* R = keyR ? keyR : silence;
-        return mode == kEnv ? env(p, bpm, L, R, n) : follow(L, R, n);
-    }
-
-private:
-    static constexpr int kWarmup = static_cast<int>(0.060f * ef::kRate);   // as Pump's detector
-    static constexpr float kLog2Thousand = 9.96578428f;                    // 60 dB is 10^-3
-    static constexpr float kFollowGain = 2.14f;                            // see the header
-    static constexpr float kTiny = 1e-6f;                                  // -120 dB: the envelope is over
-
-    static double rateOf(double rate) {
-        return rate >= kMinRateBeats ? std::min(rate, kMaxRateBeats) : (rate < kMinRateBeats ? kMinRateBeats : 1.0);
+        if (mode == kFollow) return std::min(fol_.process(L, R, n) * kFollowGain, 1.0f);
+        const float sens = ef::clampParam(p.sensitivity, 0.0f, 1.0f, 0.5f);
+        if (sens != sens_) {
+            sens_ = sens;
+            det_.setSensitivity(sens);
+        }
+        return env(p, bpm, det_.process(L, R, n), n);
     }
 
     void pick(int mode) {
         mode_ = mode;
         env_ = 0.0f;
+        fol_.reset();
         if (mode == kEnv) mute_ = kWarmup;
     }
 
@@ -120,13 +191,8 @@ private:
         return v >= 0.0f ? (v <= 1.0f ? v : 1.0f) : 0.0f;   // (and a NaN is 0)
     }
 
-    float env(const Params& p, double bpm, const float* L, const float* R, int n) {
-        const float sens = ef::clampParam(p.sensitivity, 0.0f, 1.0f, 0.5f);
-        if (sens != sens_) {
-            sens_ = sens;
-            det_.setSensitivity(sens);
-        }
-        int at = det_.process(L, R, n);
+    // at: the offset of the detector's first onset in the chunk, or -1.
+    float env(const Params& p, double bpm, int at, int n) {
         if (mute_ > 0) {   // still warming up: what it finds is the audio starting, not a hit
             mute_ = std::max(mute_ - n, 0);
             at = -1;
@@ -144,38 +210,13 @@ private:
         return out;
     }
 
-    // EffectForce's EnvFollower: peak of the two sides, attack and release one-pole, the level at the
-    // chunk's end. On NEON in a vector's lanes: VFP has no min or max, and its compares stall on the flags.
-    float follow(const float* L, const float* R, int n) {
-#if EF_NEON
-        float32x2_t e = vdup_n_f32(env_);
-        const float32x2_t att = vdup_n_f32(att_), rel = vdup_n_f32(rel_), big = vdup_n_f32(FLT_MAX);
-        for (int i = 0; i < n; ++i) {
-            float32x2_t v = vld1_lane_f32(R + i, vld1_dup_f32(L + i), 1);
-            v = vreinterpret_f32_u32(vand_u32(vreinterpret_u32_f32(v), vcale_f32(v, big)));   // sanitize()
-            v = vabs_f32(v);
-            const float32x2_t x = vpmax_f32(v, v);
-            e = vfma_f32(e, vsub_f32(x, e), vbsl_f32(vcgt_f32(x, e), att, rel));   // fused, as GCC builds the VFP version
-        }
-        const float last = vget_lane_f32(e, 0);
-#else
-        float last = env_;
-        for (int i = 0; i < n; ++i) {
-            const float x = std::max(std::fabs(ef::sanitize(L[i])), std::fabs(ef::sanitize(R[i])));
-            last += (x - last) * (x > last ? att_ : rel_);
-        }
-#endif
-        env_ = last < 1e-9f ? 0.0f : last;   // no denormals while it decays
-        return std::min(env_ * kFollowGain, 1.0f);
-    }
-
     TransientDetector det_;
+    KeyFollower fol_;
     double pos_ = 0.0;        // the song position at the chunk's start, quarter-note beats
-    float env_ = 0.0f;        // Env: the value now; Follow: the peak level
+    float env_ = 0.0f;        // Env: the value now
     float sens_ = 0.5f;       // what the detector is set to (its default)
     int mode_ = kOff;         // the mode the last chunk ran
     int mute_ = 0;            // samples the detector's onsets are not taken, warming up
-    float att_ = ef::smoothCoef(5e-3f), rel_ = ef::smoothCoef(150e-3f);   // Follow's
 };
 
 } // namespace gf
