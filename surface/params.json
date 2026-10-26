@@ -1074,6 +1074,1442 @@
    "max": 1,
    "default": 0.0,
    "display": "string"
+  },
+  {
+   "key": "dry",
+   "name": "Dry Level",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "echo_on",
+   "name": "Echo",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "echo_order",
+   "name": "Echo Order",
+   "options": [
+    "Echo First",
+    "Echo Last"
+   ],
+   "default": "Echo First"
+  },
+  {
+   "key": "echo_route",
+   "name": "Echo Routing",
+   "options": [
+    "Parallel",
+    "Serial",
+    "Pairs",
+    "Ring",
+    "Spread"
+   ],
+   "default": "Parallel"
+  },
+  {
+   "key": "echo_send",
+   "name": "Echo Send",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "echo_fb",
+   "name": "Echo FB",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "echo_tone",
+   "name": "Echo Tone",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "echo_duck",
+   "name": "Echo Duck",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "echo_freeze",
+   "name": "Echo Freeze",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "echo_glide",
+   "name": "Echo Glide",
+   "options": [
+    "Tape",
+    "Fade"
+   ],
+   "default": "Tape"
+  },
+  {
+   "key": "echo_width",
+   "name": "Echo Width",
+   "min": 0,
+   "max": 1,
+   "default": 0.666667,
+   "display": "string"
+  },
+  {
+   "key": "echo_level",
+   "name": "Echo Level",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "a_on",
+   "name": "A On",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "a_level",
+   "name": "A Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.8,
+   "display": "string"
+  },
+  {
+   "key": "a_pan",
+   "name": "A Pan",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "a_sync",
+   "name": "A Sync",
+   "options": [
+    "Sync",
+    "Free"
+   ],
+   "default": "Sync"
+  },
+  {
+   "key": "a_div",
+   "name": "A Division",
+   "options": [
+    "1/64",
+    "1/32T",
+    "1/32",
+    "1/16T",
+    "1/16",
+    "1/8T",
+    "1/16.",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "5/16",
+    "1/2T",
+    "1/4.",
+    "7/16",
+    "1/2",
+    "5/8",
+    "1/2.",
+    "1 bar"
+   ],
+   "default": "1/8."
+  },
+  {
+   "key": "a_div__open",
+   "name": "A Division List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "a_div",
+   "type": "enum"
+  },
+  {
+   "key": "a_ms",
+   "name": "A Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.779766,
+   "display": "string"
+  },
+  {
+   "key": "a_fb",
+   "name": "A Feedback",
+   "min": 0,
+   "max": 1,
+   "default": 0.4,
+   "display": "string"
+  },
+  {
+   "key": "a_mode",
+   "name": "A Mode",
+   "options": [
+    "Stereo",
+    "Ping-Pong",
+    "Mono"
+   ],
+   "default": "Stereo"
+  },
+  {
+   "key": "a_ftype",
+   "name": "A Filter Type",
+   "options": [
+    "LP",
+    "BP",
+    "HP"
+   ],
+   "default": "LP"
+  },
+  {
+   "key": "a_cut",
+   "name": "A Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "a_reso",
+   "name": "A Resonance",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "a_place",
+   "name": "A Filter Place",
+   "options": [
+    "In Loop",
+    "On Output"
+   ],
+   "default": "In Loop"
+  },
+  {
+   "key": "a_drive",
+   "name": "A Drive",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "a_wow",
+   "name": "A Wow",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "a_mod",
+   "name": "A Modulator",
+   "options": [
+    "Off",
+    "LFO",
+    "Env",
+    "Follow"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "a_mshape",
+   "name": "A Mod Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "a_mshape__open",
+   "name": "A Mod Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "a_mshape",
+   "type": "enum"
+  },
+  {
+   "key": "a_mrate",
+   "name": "A Mod Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "a_mrate__open",
+   "name": "A Mod Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "a_mrate",
+   "type": "enum"
+  },
+  {
+   "key": "a_mcut",
+   "name": "A Mod Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "a_mtime",
+   "name": "A Mod Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "a_mlevel",
+   "name": "A Mod Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "b_on",
+   "name": "B On",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "b_level",
+   "name": "B Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.8,
+   "display": "string"
+  },
+  {
+   "key": "b_pan",
+   "name": "B Pan",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "b_sync",
+   "name": "B Sync",
+   "options": [
+    "Sync",
+    "Free"
+   ],
+   "default": "Sync"
+  },
+  {
+   "key": "b_div",
+   "name": "B Division",
+   "options": [
+    "1/64",
+    "1/32T",
+    "1/32",
+    "1/16T",
+    "1/16",
+    "1/8T",
+    "1/16.",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "5/16",
+    "1/2T",
+    "1/4.",
+    "7/16",
+    "1/2",
+    "5/8",
+    "1/2.",
+    "1 bar"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "b_div__open",
+   "name": "B Division List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "b_div",
+   "type": "enum"
+  },
+  {
+   "key": "b_ms",
+   "name": "B Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.779766,
+   "display": "string"
+  },
+  {
+   "key": "b_fb",
+   "name": "B Feedback",
+   "min": 0,
+   "max": 1,
+   "default": 0.4,
+   "display": "string"
+  },
+  {
+   "key": "b_mode",
+   "name": "B Mode",
+   "options": [
+    "Stereo",
+    "Ping-Pong",
+    "Mono"
+   ],
+   "default": "Stereo"
+  },
+  {
+   "key": "b_ftype",
+   "name": "B Filter Type",
+   "options": [
+    "LP",
+    "BP",
+    "HP"
+   ],
+   "default": "LP"
+  },
+  {
+   "key": "b_cut",
+   "name": "B Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "b_reso",
+   "name": "B Resonance",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "b_place",
+   "name": "B Filter Place",
+   "options": [
+    "In Loop",
+    "On Output"
+   ],
+   "default": "In Loop"
+  },
+  {
+   "key": "b_drive",
+   "name": "B Drive",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "b_wow",
+   "name": "B Wow",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "b_mod",
+   "name": "B Modulator",
+   "options": [
+    "Off",
+    "LFO",
+    "Env",
+    "Follow"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "b_mshape",
+   "name": "B Mod Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "b_mshape__open",
+   "name": "B Mod Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "b_mshape",
+   "type": "enum"
+  },
+  {
+   "key": "b_mrate",
+   "name": "B Mod Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "b_mrate__open",
+   "name": "B Mod Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "b_mrate",
+   "type": "enum"
+  },
+  {
+   "key": "b_mcut",
+   "name": "B Mod Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "b_mtime",
+   "name": "B Mod Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "b_mlevel",
+   "name": "B Mod Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "c_on",
+   "name": "C On",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "c_level",
+   "name": "C Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.8,
+   "display": "string"
+  },
+  {
+   "key": "c_pan",
+   "name": "C Pan",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "c_sync",
+   "name": "C Sync",
+   "options": [
+    "Sync",
+    "Free"
+   ],
+   "default": "Sync"
+  },
+  {
+   "key": "c_div",
+   "name": "C Division",
+   "options": [
+    "1/64",
+    "1/32T",
+    "1/32",
+    "1/16T",
+    "1/16",
+    "1/8T",
+    "1/16.",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "5/16",
+    "1/2T",
+    "1/4.",
+    "7/16",
+    "1/2",
+    "5/8",
+    "1/2.",
+    "1 bar"
+   ],
+   "default": "5/16"
+  },
+  {
+   "key": "c_div__open",
+   "name": "C Division List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "c_div",
+   "type": "enum"
+  },
+  {
+   "key": "c_ms",
+   "name": "C Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.779766,
+   "display": "string"
+  },
+  {
+   "key": "c_fb",
+   "name": "C Feedback",
+   "min": 0,
+   "max": 1,
+   "default": 0.4,
+   "display": "string"
+  },
+  {
+   "key": "c_mode",
+   "name": "C Mode",
+   "options": [
+    "Stereo",
+    "Ping-Pong",
+    "Mono"
+   ],
+   "default": "Stereo"
+  },
+  {
+   "key": "c_ftype",
+   "name": "C Filter Type",
+   "options": [
+    "LP",
+    "BP",
+    "HP"
+   ],
+   "default": "LP"
+  },
+  {
+   "key": "c_cut",
+   "name": "C Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "c_reso",
+   "name": "C Resonance",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "c_place",
+   "name": "C Filter Place",
+   "options": [
+    "In Loop",
+    "On Output"
+   ],
+   "default": "In Loop"
+  },
+  {
+   "key": "c_drive",
+   "name": "C Drive",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "c_wow",
+   "name": "C Wow",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "c_mod",
+   "name": "C Modulator",
+   "options": [
+    "Off",
+    "LFO",
+    "Env",
+    "Follow"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "c_mshape",
+   "name": "C Mod Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "c_mshape__open",
+   "name": "C Mod Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "c_mshape",
+   "type": "enum"
+  },
+  {
+   "key": "c_mrate",
+   "name": "C Mod Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "c_mrate__open",
+   "name": "C Mod Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "c_mrate",
+   "type": "enum"
+  },
+  {
+   "key": "c_mcut",
+   "name": "C Mod Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "c_mtime",
+   "name": "C Mod Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "c_mlevel",
+   "name": "C Mod Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "d_on",
+   "name": "D On",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "d_level",
+   "name": "D Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.8,
+   "display": "string"
+  },
+  {
+   "key": "d_pan",
+   "name": "D Pan",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "d_sync",
+   "name": "D Sync",
+   "options": [
+    "Sync",
+    "Free"
+   ],
+   "default": "Sync"
+  },
+  {
+   "key": "d_div",
+   "name": "D Division",
+   "options": [
+    "1/64",
+    "1/32T",
+    "1/32",
+    "1/16T",
+    "1/16",
+    "1/8T",
+    "1/16.",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "5/16",
+    "1/2T",
+    "1/4.",
+    "7/16",
+    "1/2",
+    "5/8",
+    "1/2.",
+    "1 bar"
+   ],
+   "default": "1/2"
+  },
+  {
+   "key": "d_div__open",
+   "name": "D Division List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "d_div",
+   "type": "enum"
+  },
+  {
+   "key": "d_ms",
+   "name": "D Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.779766,
+   "display": "string"
+  },
+  {
+   "key": "d_fb",
+   "name": "D Feedback",
+   "min": 0,
+   "max": 1,
+   "default": 0.4,
+   "display": "string"
+  },
+  {
+   "key": "d_mode",
+   "name": "D Mode",
+   "options": [
+    "Stereo",
+    "Ping-Pong",
+    "Mono"
+   ],
+   "default": "Stereo"
+  },
+  {
+   "key": "d_ftype",
+   "name": "D Filter Type",
+   "options": [
+    "LP",
+    "BP",
+    "HP"
+   ],
+   "default": "LP"
+  },
+  {
+   "key": "d_cut",
+   "name": "D Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 1.0,
+   "display": "string"
+  },
+  {
+   "key": "d_reso",
+   "name": "D Resonance",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "d_place",
+   "name": "D Filter Place",
+   "options": [
+    "In Loop",
+    "On Output"
+   ],
+   "default": "In Loop"
+  },
+  {
+   "key": "d_drive",
+   "name": "D Drive",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "d_wow",
+   "name": "D Wow",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "d_mod",
+   "name": "D Modulator",
+   "options": [
+    "Off",
+    "LFO",
+    "Env",
+    "Follow"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "d_mshape",
+   "name": "D Mod Shape",
+   "options": [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Ramp Up",
+    "Ramp Down",
+    "Square",
+    "Pulse 25",
+    "Pump Smooth",
+    "Pump Soft",
+    "Pump Punch",
+    "Pump Hard",
+    "Pump Snap",
+    "Pump Long",
+    "Pump Late",
+    "Pump Linear",
+    "Pump S-Curve",
+    "Pump Hold",
+    "1/8",
+    "1/4",
+    "Offbeat",
+    "Off 16ths",
+    "Dotted",
+    "Tresillo",
+    "Gallop",
+    "Rev Gallop",
+    "Trance 1",
+    "Trance 2",
+    "Trance 3",
+    "Stutter",
+    "Half Bar",
+    "Build",
+    "Offbeat Accent",
+    "Rolling 16ths",
+    "Gallop Accent",
+    "Shuffle",
+    "Random Steps",
+    "Random Smooth"
+   ],
+   "default": "Sine"
+  },
+  {
+   "key": "d_mshape__open",
+   "name": "D Mod Shape List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "d_mshape",
+   "type": "enum"
+  },
+  {
+   "key": "d_mrate",
+   "name": "D Mod Rate",
+   "options": [
+    "1/16",
+    "1/8T",
+    "1/8",
+    "1/4T",
+    "1/8.",
+    "1/4",
+    "1/4.",
+    "1/2",
+    "1/2.",
+    "1 bar",
+    "2 bars",
+    "4 bars"
+   ],
+   "default": "1/4"
+  },
+  {
+   "key": "d_mrate__open",
+   "name": "D Mod Rate List",
+   "options": [
+    "Closed",
+    "Open"
+   ],
+   "default": "Closed",
+   "popup_of": "d_mrate",
+   "type": "enum"
+  },
+  {
+   "key": "d_mcut",
+   "name": "D Mod Cutoff",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "d_mtime",
+   "name": "D Mod Time",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "d_mlevel",
+   "name": "D Mod Level",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "display": "string"
+  },
+  {
+   "key": "time_on",
+   "name": "Time",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "time_place",
+   "name": "Time Place",
+   "options": [
+    "Post",
+    "Pre"
+   ],
+   "default": "Post"
+  },
+  {
+   "key": "time_groove",
+   "name": "Time Groove",
+   "options": [
+    "Off",
+    "Swing",
+    "Drunk",
+    "Push"
+   ],
+   "default": "Off"
+  },
+  {
+   "key": "time_amount",
+   "name": "Time Amount",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
+  },
+  {
+   "key": "move",
+   "name": "Move",
+   "options": [
+    "None",
+    "Throw Beat",
+    "Throw Bar",
+    "Dub Freeze",
+    "Half-Time Bar",
+    "Tape Stop",
+    "Slow Down",
+    "Reverse Beat",
+    "Spin-Back",
+    "Stutter 1/8",
+    "Stutter 1/16",
+    "Roll Build 1 Bar",
+    "Roll Build 4 Bars",
+    "Filter Drop",
+    "Gate 1/16",
+    "Break",
+    "Rewind"
+   ],
+   "default": "None"
+  },
+  {
+   "key": "move_mode",
+   "name": "Move Mode",
+   "options": [
+    "One Shot",
+    "Loop"
+   ],
+   "default": "One Shot"
+  },
+  {
+   "key": "move_quant",
+   "name": "Move Quantize",
+   "options": [
+    "1/16",
+    "Beat",
+    "Bar"
+   ],
+   "default": "Beat"
+  },
+  {
+   "key": "move_go",
+   "name": "Move Go",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "type": "trigger"
+  },
+  {
+   "key": "move_1",
+   "name": "Move 1",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_2",
+   "name": "Move 2",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_3",
+   "name": "Move 3",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_4",
+   "name": "Move 4",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_5",
+   "name": "Move 5",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_6",
+   "name": "Move 6",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_7",
+   "name": "Move 7",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_8",
+   "name": "Move 8",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_9",
+   "name": "Move 9",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_10",
+   "name": "Move 10",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_11",
+   "name": "Move 11",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_12",
+   "name": "Move 12",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_13",
+   "name": "Move 13",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_14",
+   "name": "Move 14",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_15",
+   "name": "Move 15",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "move_16",
+   "name": "Move 16",
+   "options": [
+    "-",
+    "On"
+   ],
+   "default": "-",
+   "display": "string"
+  },
+  {
+   "key": "echo_sens",
+   "name": "Echo Sens",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "display": "string"
   }
  ]
 }

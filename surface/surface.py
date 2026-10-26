@@ -197,7 +197,7 @@ KNOB_SIZES = {"big": 30}
 KNOB_STYLES = {r - b: {"bipolar": bool(b), "track": 4 if r - b >= 28 else 3, "pointer": 3.0 if r - b >= 28 else 2.5}
                for r in KNOB_SIZES.values() for b in (0, 1)}
 BIPOLAR_EXTRA = ()                                # every bipolar knob here has a symmetric range
-PRIMARY_BUTTONS = ("pre_save",)                   # drawn in the accent colour by skin_polish.py
+PRIMARY_BUTTONS = ("pre_save", "move_go")         # drawn in the accent colour by skin_polish.py
 FRAMES = 128                                      # shadow_skin: every filmstrip has 128 frames
 
 
@@ -261,8 +261,8 @@ class Layout:
     def button(self, cx, cy, label, key):
         self.add('button cx=%d cy=%d label="%s" key=%s' % (cx, cy, label, key))
 
-    def text(self, cx, top, label):   # bitmap font; top = the top of the glyphs (render_conf_preview.c)
-        self.add('text cx=%d cy=%d label="%s" color=%s' % (cx, top, label, TEXT_INK))
+    def text(self, cx, top, label, size=None):   # bitmap font; top = the top of the glyphs (render_conf_preview.c)
+        self.add('text cx=%d cy=%d label="%s" color=%s%s' % (cx, top, label, TEXT_INK, " size=%s" % size if size else ""))
 
     def toggle(self, cx, cy, key):
         self.add('toggle cx=%d cy=%d label="%s" key=%s' % (cx, cy, PARAMS[key]["name"], key))
@@ -272,6 +272,7 @@ class Layout:
 
 
 ON_SW = 64   # an Off | On switch (one segment image size per key: a key drawn twice is drawn alike)
+ORDER_SW = 104   # Echo First | Echo Last
 
 
 def build_layout():
@@ -281,19 +282,21 @@ def build_layout():
     L = Layout()
 
     # GROOVE (docs/DESIGN.md "Pages"): the eight knobs that finish most presets, with the swing's unit right under the
-    # Swing knob (1/16 | 1/8: the one choice that says what the knob swings), and the parts' switches. The echo's knobs
-    # and the parts Echo and Time join it with their plans.
+    # Swing knob (1/16 | 1/8: the one choice that says what the knob swings), and the parts' switches: the four parts,
+    # the Echo's order and Time's place.
     L.group("GROOVE")
-    L.page("GROOVE", ["pump_depth", "shape_depth", "swing", "mix", "output", "pump_length", "vol_depth", "flt_depth"])
+    L.page("GROOVE", ["pump_depth", "shape_depth", "echo_send", "echo_fb", "echo_tone", "swing", "mix", "output"])
     L.header(status_w=700)
     L.stepper(998, 121, 516, "preset")
     L.card(24, R1, 1232, 270, "KNOBS")
-    for cx, k in zip(S8, ("pump_depth", "shape_depth", "swing", "mix", "output", "pump_length", "vol_depth", "flt_depth")):
+    for cx, k in zip(S8, ("pump_depth", "shape_depth", "echo_send", "echo_fb", "echo_tone", "swing", "mix", "output")):
         L.knob(cx, R1 + 126, k)
-    L.hseg(S8[2], R1 + 244, "swing_unit", ON_SW)   # no label: it sits where the knob's value text ends, and says 1/16 | 1/8
+    L.hseg(S8[5], R1 + 244, "swing_unit", ON_SW)   # no label: it sits where the knob's value text ends, and says 1/16 | 1/8
     L.card(24, R2, 1232, 270, "PARTS")
-    L.hseg(S8[1], R2 + 150, "pump_on", ON_SW, label="PUMP")
-    L.hseg(S8[3], R2 + 150, "shape_on", ON_SW, label="SHAPE")
+    for cx, k, label in zip(S8, ("pump_on", "shape_on", "echo_on", "time_on"), ("PUMP", "SHAPE", "ECHO", "TIME")):
+        L.hseg(cx, R2 + 150, k, ON_SW, label=label)
+    L.hseg(S8[5], R2 + 150, "echo_order", ORDER_SW, label="ORDER")
+    L.hseg(S8[7], R2 + 150, "time_place", ON_SW, label="TIME PLACE")
 
     # The browser has no knobs of its own: the Q-Links keep the preset stepper and the levels.
     L.page("PRESETS", ["preset", "input", "output", "mix"])
@@ -364,16 +367,101 @@ def build_layout():
     L.knob(856 + 100, R2 + 170, "shape_depth")
     L.knob(856 + 252, R2 + 170, "shape_mix")
 
-    # SETUP (docs/DESIGN.md "Pages"): the levels, and the Pump's detector and crossover. ECHO and TIME come before
-    # it when they exist. The status line is the header's.
+    # ECHO: the top card is the first Q-Link bank, in order (the six knobs, the routing as a column, Freeze). Below it
+    # the four lines at a glance (a line's switch, its division and its feedback; the rest is on its own page) and the
+    # part's switch, order and glide.
+    L.group("ECHO")
+    L.page("ECHO", ["echo_send", "echo_fb", "echo_tone", "echo_duck", "echo_width", "echo_level", "echo_route",
+                    "echo_freeze"])
+    L.header()
+    L.card(24, R1, 1232, 270, "ECHO")
+    for cx, k in zip(S8, ("echo_send", "echo_fb", "echo_tone", "echo_duck", "echo_width", "echo_level")):
+        L.knob(cx, R1 + 126, k)
+    L.vseg(S8[6], R1 + 160, "echo_route", sw=110, label="ROUTING")
+    L.hseg(S8[7], R1 + 126, "echo_freeze", ON_SW, label="FREEZE")
+    L.card(24, R2, 916, 270, "LINES")
+    for cx, (p, _) in zip((138, 368, 596, 826), LINES):
+        L.text(cx - 85, R2 + 54, p.upper(), size=3)   # the line's letter, left of its switch
+        L.hseg(cx, R2 + 66, p + "_on", ON_SW)
+        L.popup(cx, R2 + 108, 150, p + "_div")
+        L.knob(cx, R2 + 167, p + "_fb")
+    L.card(948, R2, 308, 270, "PART")
+    L.hseg(1102, R2 + 92, "echo_on", ON_SW, label="ON")
+    L.hseg(1102, R2 + 160, "echo_order", ORDER_SW, label="ORDER")
+    L.hseg(1102, R2 + 228, "echo_glide", ON_SW, label="GLIDE")
+
+    # LINE A to D, one page each. The top card is the line: its switch and timing, the time (a division, or free in
+    # ms), the feedback, level and pan, the mode and the wow. The filter (type and place under the cutoff and the
+    # resonance) and the modulator (what it is and plays, and its three amounts) are below. The Q-Links are the knobs
+    # that shape a line most (the first bank), then the rest.
+    def line_page(p):
+        n = p.upper()
+        L.page("LINE " + n, [p + "_" + k for k in ("div", "fb", "level", "pan", "cut", "reso", "drive", "mcut", "mtime",
+                                                    "mlevel", "wow", "mod", "ftype", "mode", "ms", "on")])
+        L.header()
+        L.card(24, R1, 1232, 270, "LINE " + n)
+        L.hseg(S8[0], R1 + 92, p + "_on", ON_SW, label="ON")
+        L.hseg(S8[0], R1 + 190, p + "_sync", ON_SW, label="TIME")
+        L.text(S8[1], R1 + 82, "DIVISION")
+        L.popup(S8[1], R1 + 126, 150, p + "_div")
+        for cx, k in zip(S8[2:6], ("ms", "fb", "level", "pan")):
+            L.knob(cx, R1 + 126, p + "_" + k)
+        L.vseg(S8[6], R1 + 160, p + "_mode", sw=110, label="MODE")
+        L.knob(S8[7], R1 + 126, p + "_wow")
+        L.card(24, R2, 456, 270, "FILTER")
+        for cx, k in zip(S8, ("cut", "reso", "drive")):
+            L.knob(cx, R2 + 82, p + "_" + k)
+        L.hseg(S8[0], R2 + 224, p + "_ftype", 46, label="TYPE")
+        L.hseg(S8[1], R2 + 224, p + "_place", 72, label="PLACE")
+        L.card(488, R2, 768, 270, "MODULATOR")
+        L.hseg(626, R2 + 92, p + "_mod", 60, label="SOURCE")
+        L.text(626, R2 + 118, "SHAPE")
+        L.popup(626, R2 + 154, 250, p + "_mshape")
+        L.text(626, R2 + 182, "RATE")
+        L.popup(626, R2 + 218, 130, p + "_mrate")
+        for cx, k in zip((846, 1010, 1174), ("mcut", "mtime", "mlevel")):
+            L.knob(cx, R2 + 126, p + "_" + k)
+
+    for p, _ in LINES:
+        line_page(p)
+
+    # TIME: its switch, where it sits in the chain and the groove it plays; below it the groove's amount and the swing
+    # (the global one, as on GROOVE) with its unit. The Q-Links follow the cards.
+    L.group("TIME")
+    L.page("TIME", ["time_on", "time_place", "time_groove", "time_amount", "swing", "swing_unit"])
+    L.header()
+    L.card(24, R1, 1232, 270, "TIME")
+    L.hseg(S8[1], R1 + 126, "time_on", ON_SW, label="ON")
+    L.hseg(S8[3], R1 + 126, "time_place", ON_SW, label="PLACE")
+    L.vseg(S8[5], R1 + 160, "time_groove", sw=110, label="GROOVE")
+    L.card(24, R2, 1232, 270, "AMOUNT AND SWING")
+    L.knob(S8[1], R2 + 126, "time_amount")
+    L.knob(S8[3], R2 + 126, "swing")
+    L.hseg(S8[3], R2 + 244, "swing_unit", ON_SW)
+
+    # MOVES: the 16 Moves as pads (the plugin names and lights them; a tap fires the Move at the quantize), and under
+    # them the mode and the quantize every Move shares, the Move playing and GO, which fires it again.
+    L.page("MOVES", ["move", "move_mode", "move_quant"])
+    L.header()
+    L.card(24, R1, 1232, 336, "MOVES")
+    L.tiles(44, R1 + 52, 1192, 4, 4, 62, 8, "move")
+    L.card(24, 502, 1232, 212, "FIRING")
+    L.hseg(190, 640, "move_mode", 100, label="MODE")
+    L.hseg(470, 640, "move_quant", 70, label="QUANTIZE")
+    L.text(800, 594, "MOVE")
+    L.readout(800, 640, 320, "move")
+    L.button(1130, 640, "GO", "move_go")
+
+    # SETUP (docs/DESIGN.md "Pages"): the levels (the dry bus too), and the detectors and the Pump's crossover. The
+    # status line is the header's.
     L.group("SETUP")
-    L.page("SETUP", ["input", "output", "pump_sens", "pump_xover"])
+    L.page("SETUP", ["input", "output", "dry", "pump_sens", "pump_xover", "echo_sens"])
     L.header()
     L.card(24, R1, 608, 270, "LEVELS")
-    for cx, k in zip(L4, ("input", "output")):
+    for cx, k in zip(L4, ("input", "output", "dry")):
         L.knob(cx, R1 + 126, k)
-    L.card(648, R1, 608, 270, "PUMP")
-    for cx, k in zip(R4, ("pump_sens", "pump_xover")):
+    L.card(648, R1, 608, 270, "PUMP AND ECHO")
+    for cx, k in zip(R4, ("pump_sens", "pump_xover", "echo_sens")):
         L.knob(cx, R1 + 126, k)
     return L
 
@@ -402,6 +490,7 @@ MAX_IMAGE_H = 16384          # taller skin images draw wrongly (sd88me/mpc-vst-p
 POP_ROW, POP_GAP, POP_PAD, POP_GROUP_ROWS = 40, 2, 6, 8
 LIVE_PX, POP_ARROW = 26, 44   # a popup's closed field: live text 26 px in the field minus its arrow (shadow_skin)
 FIELD_PAD = 8                 # and the text keeps this much clear of the field's edge
+TILE_PX, TILE_PAD = 24, 24    # a list tile's live text: 24 px, in the tile's width minus this (shadow_skin)
 BITMAP_GLYPHS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-/_>%+:#"   # font8x8.h font_chars
 BITMAP_ADVANCE = {" ": 4, "J": 9, "j": 9, ".": 9, "-": 9, ":": 9}   # font_glyph_width(): last lit column + 2; else 10
 INT_KEYS = ("x", "y", "w", "h", "cx", "cy", "r", "sw", "rows", "cols", "th", "gap", "cw")
@@ -733,6 +822,11 @@ def check_layout(text, groups):
                 continue
             if kind == "list" and p["kind"] != "tile":
                 errors.append("%s: list %r tiles must be tile parameters" % (T, key))
+            if kind == "list":   # the tile's text is live: what the plugin writes there must fit
+                room = (w["w"] - (w["cols"] - 1) * w["gap"]) // w["cols"] - TILE_PAD
+                errors += ["%s: list %s: %r is wider than its tile (%d px of text, %d px of room)" % (
+                    T, key, t, ttf_width(LIVE_FONT, TILE_PX, t), room)
+                    for t in TILE_TEXTS.get(key, []) if ttf_width(LIVE_FONT, TILE_PX, t) > room]
             if kind == "stepper" and p["kind"] != "stepper":
                 errors.append("%s: stepper %r is not a stepper parameter" % (T, key))
             if kind == "meter" and p["kind"] != "meter":
@@ -1098,6 +1192,92 @@ for lane, name in LANES:
 enum("flt_type", "Filter Type", ["LP", "BP", "HP"], "LP")
 num("flt_cutoff", "Cutoff", "log", 20, 20000, 20000, "hz")
 num("flt_reso", "Resonance", "lin", 0, 1, 0, "pct")
+
+
+# --- Echo, Time and Moves: docs/DESIGN.md "Echo", "Time" and "Moves" ------------------------------------------
+# Appended after Shape's (plan 2; params.lock keeps plan 1's 100 where they are). The option lists the DSP also has are
+# named here, one list each, in the order of the DSP's own enum or table (named at each): plugin/groove_map.cpp
+# static_asserts them against it, so a list that drifts stops the build instead of mapping one option to another. A
+# project stores an option by its index: append, never reorder.
+ECHO_DIVS = ["1/64", "1/32T", "1/32", "1/16T", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4", "5/16", "1/2T",
+             "1/4.", "7/16", "1/2", "5/8", "1/2.", "1 bar"]               # kEchoDivs: by length, so a Q-Link walks them
+ECHO_ORDERS = ["Echo First", "Echo Last"]                                   # Groove::Order: kEchoFirst, kEchoLast
+ECHO_ROUTES = ["Parallel", "Serial", "Pairs", "Ring", "Spread"]             # Echo::Routing
+ECHO_GLIDES = ["Tape", "Fade"]                                              # EchoLine::Glide
+LINES = (("a", "1/8."), ("b", "1/4"), ("c", "5/16"), ("d", "1/2"))          # the four lines, and their divisions at rest
+LINE_SYNCS = ["Sync", "Free"]                                               # a line's time: a division, or 1..2000 ms
+LINE_MODES = ["Stereo", "Ping-Pong", "Mono"]                                # EchoLine::Mode
+LINE_FILTERS = ["LP", "BP", "HP"]                                           # EchoLine::FilterType
+LINE_PLACES = ["In Loop", "On Output"]                                      # EchoLine::Place
+LINE_MODS = ["Off", "LFO", "Env", "Follow"]                                 # EchoMod::Mode
+TIME_PLACES = ["Post", "Pre"]                                               # Groove::Place: Time after or before the parts
+TIME_GROOVES = ["Off", "Swing", "Drunk", "Push"]                            # Time::Groove
+MOVE_NAMES = ["Throw Beat", "Throw Bar", "Dub Freeze", "Half-Time Bar", "Tape Stop", "Slow Down", "Reverse Beat",
+              "Spin-Back", "Stutter 1/8", "Stutter 1/16", "Roll Build 1 Bar", "Roll Build 4 Bars", "Filter Drop",
+              "Gate 1/16", "Break", "Rewind"]                                # the 16 factory Moves, in tile order
+MOVE_MODES = ["One Shot", "Loop"]                                           # Moves::Mode
+MOVE_QUANTS = ["1/16", "Beat", "Bar"]                                       # Moves::Quant
+MOVE_TILES = len(MOVE_NAMES)
+TILE_TEXTS = {"move": MOVE_NAMES}       # the texts the plugin writes on a list's tiles, where they are known here
+
+# the dry bus's level (Break and the Moves ramp it), and the whole Echo: switched on with its order (before or after
+# Shape and Pump), a routing between the lines, and what the lines hear and give back
+num("dry", "Dry Level", "lin", 0, 1, 1, "pct")
+enum("echo_on", "Echo", ON_OFF, "Off")
+enum("echo_order", "Echo Order", ECHO_ORDERS, "Echo First")
+enum("echo_route", "Echo Routing", ECHO_ROUTES, "Parallel")
+num("echo_send", "Echo Send", "lin", 0, 1, 1, "pct")
+num("echo_fb", "Echo FB", "lin", -1, 1, 0, "spct")                   # an offset to all four lines' feedbacks
+num("echo_tone", "Echo Tone", "lin", -1, 1, 0, "spct")               # an offset to their cutoffs, up to 4 octaves
+num("echo_duck", "Echo Duck", "lin", 0, 1, 0, "pct")
+enum("echo_freeze", "Echo Freeze", ON_OFF, "Off")
+enum("echo_glide", "Echo Glide", ECHO_GLIDES, "Tape")
+num("echo_width", "Echo Width", "lin", 0, 1.5, 1, "pct")
+num("echo_level", "Echo Level", "lin", 0, 1, 1, "pct")
+
+# the lines, A to D: each a stereo delay with its own filter, drive, wow and modulator. The long lists are popups.
+for p, div in LINES:
+    n = p.upper()
+    enum(p + "_on", n + " On", ON_OFF, "Off")
+    num(p + "_level", n + " Level", "lin", 0, 1, 0.8, "pct")
+    num(p + "_pan", n + " Pan", "lin", -1, 1, 0, "spct")
+    enum(p + "_sync", n + " Sync", LINE_SYNCS, "Sync")
+    enum(p + "_div", n + " Division", ECHO_DIVS, div)
+    popup_flag(p + "_div")
+    num(p + "_ms", n + " Time", "log", 1, 2000, 375, "ms")
+    num(p + "_fb", n + " Feedback", "lin", 0, 1, 0.4, "pct")
+    enum(p + "_mode", n + " Mode", LINE_MODES, "Stereo")
+    enum(p + "_ftype", n + " Filter Type", LINE_FILTERS, "LP")
+    num(p + "_cut", n + " Cutoff", "log", 20, 20000, 20000, "hz")
+    num(p + "_reso", n + " Resonance", "lin", 0, 1, 0, "pct")
+    enum(p + "_place", n + " Filter Place", LINE_PLACES, "In Loop")
+    num(p + "_drive", n + " Drive", "lin", 0, 1, 0, "pct")
+    num(p + "_wow", n + " Wow", "lin", 0, 1, 0, "pct")
+    enum(p + "_mod", n + " Modulator", LINE_MODS, "Off")
+    enum(p + "_mshape", n + " Mod Shape", SHAPE_NAMES, "Sine")
+    popup_flag(p + "_mshape")
+    enum(p + "_mrate", n + " Mod Rate", SHAPE_RATES, "1/4")
+    popup_flag(p + "_mrate")
+    num(p + "_mcut", n + " Mod Cutoff", "lin", -1, 1, 0, "spct")     # how far the modulator moves the cutoff,
+    num(p + "_mtime", n + " Mod Time", "lin", -1, 1, 0, "spct")      # the time (a small pitch wobble)
+    num(p + "_mlevel", n + " Mod Level", "lin", 0, 1, 0, "pct")      # and the level
+
+# Time: the always-recording ring behind the Groove and the Moves; and the Moves, one tap each on the grid. The
+# Move parameter is the one being played, None at rest, and automatable: a change of it fires that Move at the
+# quantize. The 16 tiles and GO act when pressed (the plugin lights and names the tiles).
+enum("time_on", "Time", ON_OFF, "Off")
+enum("time_place", "Time Place", TIME_PLACES, "Post")
+enum("time_groove", "Time Groove", TIME_GROOVES, "Off")
+num("time_amount", "Time Amount", "lin", 0, 1, 0.5, "pct")
+enum("move", "Move", ["None"] + MOVE_NAMES, "None")
+enum("move_mode", "Move Mode", MOVE_MODES, "One Shot")
+enum("move_quant", "Move Quantize", MOVE_QUANTS, "Beat")
+button("move_go", "Move Go")
+for i in range(1, MOVE_TILES + 1):
+    tile("move_%d" % i, "Move %d" % i)
+
+# the Env modulators' detector (on the SETUP page)
+num("echo_sens", "Echo Sens", "lin", 0, 1, 0.5, "pct")
 
 PARAMS = {p["key"]: p for p in P}   # every parameter is declared: the layout and its checks look them up by key
 
