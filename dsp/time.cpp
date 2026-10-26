@@ -54,14 +54,28 @@ void TimeCurve::bind(const TPoint* points, int count) {
     n_ = count;
     i_ = 0;
     jq_ = -1;
+    crossed_ = false;
 }
 
 void TimeCurve::seek(double x) {
+    crossed_ = false;
     if (!(x >= static_cast<double>(p_[i_].x))) {   // backwards (a locate, a lap), or not a number: from the start
         i_ = 0;
         jq_ = -1;
     }
-    while (i_ + 2 < n_ && x >= static_cast<double>(p_[i_ + 1].x)) ++i_;
+    while (i_ + 2 < n_ && x >= static_cast<double>(p_[i_ + 1].x)) {
+        if (p_[i_].seg == TSeg::Jump) {   // over the line: from the Jump's point to where it lands
+            crossed_ = true;
+            crossGap_ = gapOf(i_);
+        }
+        ++i_;
+    }
+}
+
+double TimeCurve::gapOf(int jq) const {
+    int k = jq - 1;
+    while (k > 0 && p_[k].seg != TSeg::Jump) --k;
+    return static_cast<double>(p_[jq].x) - (k >= 0 && p_[k].seg == TSeg::Jump ? static_cast<double>(p_[k].x) : static_cast<double>(p_[0].x));
 }
 
 double TimeCurve::value(double x) const {
@@ -96,6 +110,7 @@ double TimeCurve::nextJump(double& landsAt, double& slopeAfter) {
         jq_ = i_ + 1;
         while (jq_ < n_ - 1 && p_[jq_].seg != TSeg::Jump) ++jq_;
         if (jq_ >= n_ - 1) jq_ = n_;
+        else gap_ = gapOf(jq_);
     }
     if (jq_ >= n_) return HUGE_VAL;
     landsAt = p_[jq_ + 1].y;
@@ -160,16 +175,31 @@ void TimeCore::reset() {
     prevEff_ = -1;
     calm_ = true;
     fade_ = 0;
+    held_ = false;
     g_ = 1.0f;
+}
+
+void TimeCore::useLibrary(const TimePatternDef* defs, int count, const TPoint* points) {
+    defs_ = defs && points && count > 0 ? defs : nullptr;
+    points_ = defs_ ? points : nullptr;
+    numDefs_ = defs_ ? count : 0;
+    pat_ = -1;   // whatever was bound is another pattern now
 }
 
 void TimeCore::bind(int pattern) {
     pat_ = pattern;
-    const TimePatternDef& d = kTimePatterns[pattern];
+    const TimePatternDef& d = defs_ ? defs_[pattern] : kTimePatterns[pattern];
+    const TPoint* points = points_ ? points_ : kTimePoints;
     len_ = d.lengthBeats;
     loop_ = d.loopable;
-    src_.bind(kTimePoints + d.srcFirst, d.srcCount);
-    vol_.bind(kTimePoints + d.volFirst, d.volCount);
+    src_.bind(points + d.srcFirst, d.srcCount);
+    vol_.bind(points + d.volFirst, d.volCount);
+    double last = 0.0;   // the line before the end: the last Jump short of it
+    for (int k = 0; k < d.srcCount; ++k) {
+        const TPoint& pt = points[d.srcFirst + k];
+        if (pt.seg == TSeg::Jump && static_cast<double>(pt.x) < len_ - 1e-9) last = pt.x;
+    }
+    endGap_ = len_ - last;
     src_.seek(0.0);
     s0_ = src_.value(0.0);
     d0_ = src_.slope(0.0);
@@ -205,7 +235,10 @@ void TimeCore::headsAt(bool inPattern, double x, double lag, Heads& h) {
         if (x + leadB_ >= 0.0) h.vol = volumeAt(x + leadB_);
         return;
     }
-    if (!loop_ && x >= len_) return;   // over: back at the lag asked for, at volume 1
+    if (!loop_ && x >= len_) {   // over: back at the lag asked for, at volume 1
+        h.cut = endGap_ < tfb_ && x - bps_ < len_;   // (an end with no 5 ms of its own is made here, as a jump nothing foresaw)
+        return;
+    }
 
     double xl = x;   // in this lap
     if (loop_) {
@@ -215,6 +248,8 @@ void TimeCore::headsAt(bool inPattern, double x, double lag, Heads& h) {
         if (!(xl >= 0.0 && xl < len_)) xl = 0.0;
     }
     src_.seek(xl);
+    if (src_.crossed() && src_.crossGap() < tfb_) h.cut = true;   // a Jump too close behind the one before it to have been scheduled
+    if (loop_ && x >= len_ && xl < bps_ && endGap_ < tfb_) h.cut = true;   // and a wrap too close behind the last Jump
     const double speed = src_.slope(xl);
     h.lag0 = std::clamp(xl - src_.value(xl), 0.0, TimeCore::kMaxLagBeats);
     h.lag1 = h.lag0;
@@ -223,9 +258,13 @@ void TimeCore::headsAt(bool inPattern, double x, double lag, Heads& h) {
 
     double landsAt = 0.0, slopeAfter = 1.0;
     double line = src_.nextJump(landsAt, slopeAfter);
+    double room = src_.nextGap();      // the stretch since the line before this one: the fade may have it, if it is 5 ms or more
     const bool end = !(line < len_);   // the pattern's end (a last Jump at len_ is the same line)
-    if (end) line = len_;
-    if (line - xl <= tfb_) {
+    if (end) {
+        line = len_;
+        room = endGap_;
+    }
+    if (line - xl <= tfb_ && room >= tfb_) {
         const double remaining = (line - xl) / tfb_;
         if (!end) fadeIn((line - landsAt) + (1.0 - slopeAfter) * (xl - line), slopeAfter, remaining);   // the segment after the Jump, run back
         else if (loop_) fadeIn((1.0 - d0_) * (xl - len_) - s0_, d0_, remaining);                        // the next lap's start, run back
@@ -281,7 +320,7 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     ring_ = ring;
 
     // What to play: the pattern, if it is asked for and its place is a place; the lag asked for.
-    int pat = pattern >= 0 && pattern < kNumTimePatterns && std::isfinite(patternStart) ? pattern : -1;
+    int pat = pattern >= 0 && pattern < (defs_ ? numDefs_ : kNumTimePatterns) && std::isfinite(patternStart) ? pattern : -1;
     const double lam = std::isfinite(lagBeats) ? std::clamp(lagBeats, 0.0, kMaxLagBeats) : 0.0;
     double x0 = 0.0;
     if (pat >= 0) {
@@ -291,6 +330,7 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     if (pat >= 0 && pat != pat_) bind(pat);
     tfb_ = TimeCore::kFade * bps;
     leadB_ = TimeCore::kEdge * bps;
+    bps_ = bps;
     const double x1 = x0 + n * bps;
     const bool inRange = pat >= 0 && x1 >= -tfb_ && (loop_ || x0 < len_);   // within 5 ms of the start up to the end
 
@@ -309,33 +349,55 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     const bool cont = !fresh_ && inRange == (prevEff_ >= 0) && lam == prevLam_ && spb == prevSpb_ &&
                       (!inRange || (pat == prevEff_ && patternStart == prevStart_ && std::fabs(x0 - prevX_) <= 0.5 * bps));
     bool checked = cont || fresh_;
+    bool have = !fresh_;   // there is a last sample to go on from
     fresh_ = false;
 
     Heads h;
-    double carry = 0.0;
+    double carry = prevPos_;    // where the head that goes on read at the sample before: the one that is heard past any line
+    float speed = prevSpeed_;   // and how fast it was going
     for (int i = 0; i < n; ++i) {
         const int64_t now = a0 + i;
         headsAt(inRange, x0 + i * bps, lam, h);
         const double pos0 = static_cast<double>(now) - h.lag0 * spb;
         const bool two = h.w > 0.0f;
         const double pos1 = static_cast<double>(now) - h.lag1 * spb;
-        carry = two ? pos1 : pos0;   // the head that goes on past the line
-        if (!checked) {
-            checked = true;
-            const double expected = prevPos_ + static_cast<double>(prevSpeed_);
-            if (std::fabs(carry - expected) > kHalfFrame) {   // it jumped: the old head plays on and crossfades
-                u_ = expected;
-                uSpeed_ = prevSpeed_;
+        double here = two ? pos1 : pos0;   // the head that goes on past the line
+        if (held_ && fade_ == 0) {
+            // The fade a jump waited for is over: the jump is made now, from where the head was held.
+            held_ = false;
+            if (std::fabs(here - hp_) > kHalfFrame) {
+                u_ = hp_;
+                uSpeed_ = hs_;
                 fade_ = TimeCore::kFade;
             }
+        } else if (!held_ && have && (!checked || h.cut)) {
+            const double expected = carry + static_cast<double>(speed);
+            if (std::fabs(here - expected) > kHalfFrame) {   // it jumped: the old head plays on and crossfades
+                if (fade_ > 0) {   // a fade is going: the jump waits for it, the head going on where it was heading
+                    held_ = true;
+                    hp_ = expected;
+                    hs_ = speed;
+                } else {
+                    u_ = expected;
+                    uSpeed_ = speed;
+                    fade_ = TimeCore::kFade;
+                }
+            }
         }
+        checked = true;
         float l, r;
-        read(pos0, now, l, r);
-        if (two) {
-            float l1, r1;
-            read(pos1, now, l1, r1);
-            l = l * (1.0f - h.w) + l1 * h.w;
-            r = r * (1.0f - h.w) + r1 * h.w;
+        if (held_) {
+            read(hp_, now, l, r);
+            here = hp_;
+            hp_ += static_cast<double>(hs_);
+        } else {
+            read(pos0, now, l, r);
+            if (two) {
+                float l1, r1;
+                read(pos1, now, l1, r1);
+                l = l * (1.0f - h.w) + l1 * h.w;
+                r = r * (1.0f - h.w) + r1 * h.w;
+            }
         }
         if (fade_ > 0) {
             float lu, ru;
@@ -349,6 +411,9 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
         g_ = toward(g_, h.vol * h.gain, kGainStep);
         L[i] = l * g_;
         R[i] = r * g_;
+        carry = here;
+        speed = held_ ? hs_ : h.speed;
+        have = true;
     }
 
     prevEff_ = inRange ? pat : -1;
@@ -357,8 +422,8 @@ void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pa
     prevSpb_ = spb;
     prevX_ = x1;
     prevPos_ = carry;
-    prevSpeed_ = h.speed;
-    calm_ = h.lag0 == 0.0 && h.w == 0.0f && g_ == 1.0f && fade_ == 0;
+    prevSpeed_ = speed;
+    calm_ = h.lag0 == 0.0 && h.w == 0.0f && g_ == 1.0f && fade_ == 0 && !held_;
 }
 
 
@@ -370,7 +435,6 @@ constexpr double kSlack = 1e-3;                  // samples: a line this close a
 constexpr double kSixteenth = 0.25;              // Drunk's unit, in beats
 constexpr double kMsSamples = ef::kRate / 1000.0;
 constexpr double kUnitTolerance = 1e-6;          // in units: a pattern's end this close to a line is on it
-constexpr double kSmallStep = 0.4;               // frames: TimeCore moves the playhead by less than half a frame without a crossfade; so does Time
 
 // Drunk's lag for the 16th numbered k in its bar, 0..1 of the longest: a hash of the index, so it is the same on every
 // bar, every loop and every load (a seeded random, not a random).
@@ -392,7 +456,6 @@ void Time::reset() {
     core_.reset();
     fresh_ = true;
     lastLag_ = 0.0;
-    age_ = TimeCore::kFade;
     armed_ = false;
     zoneOn_ = false;
     tail_ = 0;
@@ -522,7 +585,7 @@ void Time::set(const Params& in, const ef::Transport& t) {
 // its laps, the end of the wait after a pattern.
 Time::Piece Time::pieceAt(int i, int n) {
     const double q = qBase_ + i * bps_;
-    Piece pc{0.0, -1, 0.0, n - i, false};
+    Piece pc{0.0, -1, 0.0, n - i};
     double until = HUGE_VAL;
     bool hold = false;   // a pattern has the playhead: the groove's lines are not followed
 
@@ -554,31 +617,19 @@ Time::Piece Time::pieceAt(int i, int n) {
         }
     }
 
-    int room = n - i;   // samples this piece may take
     if (hold) {
         pc.lag = lastLag_ * bps_;
     } else {
         double next = HUGE_VAL;
         pc.lag = baseLag(q, next);
         until = std::min(until, next);
-        // A change of lag is a crossfade of 5 ms, and TimeCore cannot nest them: one asked while the last is still going
-        // (a knob, a groove switched, a pattern's end close behind) waits for its end. The groove's own lines are far
-        // enough apart (a unit is 15 ms at the fastest tempo) never to wait for each other.
-        if (std::fabs(pc.lag / bps_ - lastLag_) > kSmallStep) {   // (in samples: a tempo change moves the lag in beats, not in time)
-            if (age_ < TimeCore::kFade) {
-                pc.lag = lastLag_ * bps_;
-                room = std::min(room, TimeCore::kFade - age_);
-            } else {
-                pc.changes = true;
-            }
-        }
     }
 
     // The first sample at or after `until`, at least the next one.
     const double x = (until - qBase_) / bps_;
     int j = n;
     if (x < n) j = x > i ? std::max(i + 1, static_cast<int>(std::ceil(x))) : i + 1;
-    pc.m = std::min(std::min(j, n) - i, room);
+    pc.m = std::min(j, n) - i;
     return pc;
 }
 
@@ -592,8 +643,6 @@ void Time::process(float* L, float* R, int n) {
         t.beats = pos_ + i * bps_;
         core_.process(L + i, R + i, pc.m, t, pc.pattern, pc.start, pc.lag);
         lastLag_ = pc.lag / bps_;
-        if (pc.changes) age_ = 0;
-        age_ = std::min(age_ + pc.m, static_cast<int>(TimeCore::kFade));
         i += pc.m;
     }
     pos_ += n * bps_;

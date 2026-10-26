@@ -836,6 +836,195 @@ void timeRobust() {    // wild parameters and transports: finite, in range, noth
     CHECK(ok);
 }
 
+// --- a jump inside a fade waits for it ---------------------------------------------------------------
+
+// Two jumps in a row must not step: the second waits for the fade the first started (at most 5 ms late), then fades from where the
+// head was held. The tone is 458 Hz: half a beat at 120 BPM (11025 samples) is 114.5 cycles of it, so the heads that are an odd number
+// of half beats apart are in antiphase, and a fade restarted from the wrong place steps by nearly the tone's whole swing.
+void timeJumpInFade() {
+    const double hz = 458.0;
+    const size_t S0 = 60000;
+    const Buf in = sine(hz, 120000, 0.5f);
+    const double bound = clickBound(hz, 1.0);
+    for (size_t d : {static_cast<size_t>(44), static_cast<size_t>(88), static_cast<size_t>(176)}) {   // 1, 2 and 4 ms into the fade
+        {   // a lag asked for (half a beat: in antiphase with the live input) starts a fade; a pattern comes in d samples later
+            const int p = idx("Half-Time Bar");
+            TimeCore c;
+            CHECK(c.allocate());
+            Buf L = in, R = in;
+            play(c, L, R, 0, S0, -1, 0.0, 0.0);
+            play(c, L, R, S0, S0 + d, -1, 0.0, 0.5);
+            // the pattern is at x = 3 beats (a lag of 1.5 beats) from here, at beat S0 + d
+            const double start = static_cast<double>(S0 + d) / kBeat - 3.0;
+            play(c, L, R, S0 + d, 80000, p, start, 0.5);
+            const double top = maxStep(L, S0 - 2, 80000);
+            CHECK(top <= bound);
+            if (!(top <= bound)) std::printf("  a pattern d=%zu into a fade: a step of %.4f, the bound %.4f\n", d, top, bound);
+            // while the first fade runs the second jump is not heard: the output is the first fade's, the live input to the lag, to its end
+            bool waited = true;
+            for (size_t i = S0; i < S0 + kFade; ++i) {
+                const double live = 0.5 + 0.5 * std::cos(kPi * static_cast<double>(i - S0) / kFade);   // the old head's share
+                if (!near(L[i], live * in[i] + (1.0 - live) * interp(in, static_cast<double>(i) - 0.5 * kBeat), 3e-6)) waited = false;
+            }
+            CHECK(waited);
+            // it is late by no more than 5 ms: the lag asked is the pattern's head (lag x / 2) from 2 fades on, i.e. from S0 + 440
+            bool pure = true;
+            for (size_t i = S0 + 2 * kFade + 3; i < 79000; ++i) {
+                const double x = 3.0 + static_cast<double>(i - (S0 + d)) / kBeat;
+                if (!near(L[i], interp(in, static_cast<double>(i) - 0.5 * x * kBeat), 2e-5)) pure = false;
+            }
+            CHECK(pure);
+        }
+        {   // a locate (a beat on) starts a fade in a pattern; another beat on, d samples later
+            const int p = idx("Half-Time Bar");
+            TimeCore c;
+            CHECK(c.allocate());
+            Buf L = in, R = in;
+            const double start = static_cast<double>(S0) / kBeat - 0.5;   // x is half a beat at S0 before the locates, 1.5 and 2.5 after
+            const Beats beats = [&](size_t i) { return static_cast<double>(i) / kBeat + (i >= S0 ? 1.0 : 0.0) + (i >= S0 + d ? 1.0 : 0.0); };
+            playAt(c, L, R, 0, S0, p, start, 0.0, 120.0, beats);
+            playAt(c, L, R, S0, S0 + d, p, start, 0.0, 120.0, beats);
+            playAt(c, L, R, S0 + d, 80000, p, start, 0.0, 120.0, beats);
+            const double top = maxStep(L, S0 - 2, 80000);
+            CHECK(top <= bound);
+            if (!(top <= bound)) std::printf("  a locate d=%zu into a fade: a step of %.4f, the bound %.4f\n", d, top, bound);
+            // and the first fade's own, as if the second locate were not: the old head on its way, the new where the first locate put it
+            bool waited = true;
+            for (size_t i = S0; i < S0 + kFade; ++i) {
+                const double old = 0.5 + 0.5 * std::cos(kPi * static_cast<double>(i - S0) / kFade);
+                const double headOld = static_cast<double>(i) - 0.5 * (static_cast<double>(i) / kBeat - start) * kBeat;
+                const double headNew = static_cast<double>(i) - 0.5 * (static_cast<double>(i) / kBeat + 1.0 - start) * kBeat;
+                if (!near(L[i], old * interp(in, headOld) + (1.0 - old) * interp(in, headNew), 3e-6)) waited = false;
+            }
+            CHECK(waited);
+            bool pure = true;
+            for (size_t i = S0 + 2 * kFade + 3; i < 79000; ++i)
+                if (!near(L[i], interp(in, static_cast<double>(i) - 0.5 * (beats(i) - start) * kBeat), 2e-5)) pure = false;
+            CHECK(pure);
+        }
+    }
+    {   // three in a row, and a fade longer than they are: the last one wins, and nothing steps
+        const int p = idx("Half-Time Bar");
+        TimeCore c;
+        CHECK(c.allocate());
+        Buf L = in, R = in;
+        const double start = static_cast<double>(S0) / kBeat - 0.5;
+        const Beats beats = [&](size_t i) { return static_cast<double>(i) / kBeat + (i >= S0 ? 1.0 : 0.0) + (i >= S0 + 30 ? 1.0 : 0.0) + (i >= S0 + 70 ? 1.0 : 0.0); };
+        playAt(c, L, R, 0, S0, p, start, 0.0, 120.0, beats);
+        playAt(c, L, R, S0, S0 + 30, p, start, 0.0, 120.0, beats);
+        playAt(c, L, R, S0 + 30, S0 + 70, p, start, 0.0, 120.0, beats);
+        playAt(c, L, R, S0 + 70, 80000, p, start, 0.0, 120.0, beats);
+        CHECK(maxStep(L, S0 - 2, 80000) <= bound);
+        CHECK(allFinite(L));
+    }
+}
+
+// Patterns whose lines are closer than the library lets any be (the library's own are 331 samples apart at the fastest tempo, 999 BPM):
+// a jump with no 5 ms to itself since the line before it (or the pattern's start) is not scheduled but made at its line, and waits
+// if a fade is going. Four of them, at 120 BPM (a beat is 22050 samples, g is 60 of them, h is 80).
+void timeCloseJumps() {
+    using gf::TPoint;
+    using gf::TSeg;
+    const float g = 60.0f / 22050.0f, h = 80.0f / 22050.0f;
+    static const TPoint pts[] = {
+        // 0 Close Jumps, 2 beats: live for half a beat, then three jumps 60 samples apart, each back to an earlier place, then at speed 1
+        {0.0f, 0.0f, TSeg::Line}, {0.5f, 0.5f, TSeg::Jump}, {0.5f, 0.2f, TSeg::Line}, {0.5f + g, 0.2f + g, TSeg::Jump},
+        {0.5f + g, 0.0f, TSeg::Line}, {0.5f + 2 * g, g, TSeg::Jump}, {0.5f + 2 * g, 0.35f, TSeg::Line}, {2.0f, 1.85f - 2 * g, TSeg::Line},
+        {0.0f, 1.0f, TSeg::Line}, {2.0f, 1.0f, TSeg::Line},
+        // 1 Jump Before End, 1 beat: a jump 80 samples before the end
+        {0.0f, 0.0f, TSeg::Line}, {1.0f - h, 1.0f - h, TSeg::Jump}, {1.0f - h, 0.3f, TSeg::Line}, {1.0f, 0.3f + h, TSeg::Line},
+        {0.0f, 1.0f, TSeg::Line}, {1.0f, 1.0f, TSeg::Line},
+        // 2 Jump Before Wrap: the same, going round
+        {0.0f, 0.0f, TSeg::Line}, {1.0f - h, 1.0f - h, TSeg::Jump}, {1.0f - h, 0.3f, TSeg::Line}, {1.0f, 0.3f + h, TSeg::Line},
+        {0.0f, 1.0f, TSeg::Line}, {1.0f, 1.0f, TSeg::Line},
+        // 3 Jump After Start, 1 beat: a jump 60 samples after the start
+        {0.0f, 0.0f, TSeg::Line}, {g, g, TSeg::Jump}, {g, 0.0f, TSeg::Line}, {1.0f, 1.0f - g, TSeg::Line},
+        {0.0f, 1.0f, TSeg::Line}, {1.0f, 1.0f, TSeg::Line},
+    };
+    static const gf::TimePatternDef defs[] = {
+        {"Close Jumps", 2.0f, false, 0, 8, 8, 2},
+        {"Jump Before End", 1.0f, false, 10, 4, 14, 2},
+        {"Jump Before Wrap", 1.0f, true, 16, 4, 20, 2},
+        {"Jump After Start", 1.0f, false, 22, 4, 26, 2},
+    };
+    {   // the library gives every line its 5 ms at the fastest tempo (999 BPM), so none of its own is made this way
+        double closest = 1e9;
+        for (int p = 0; p < gf::numTimePatterns(); ++p) {
+            const gf::TimePatternDef& d = gf::timePatternDef(p);
+            const gf::TPoint* pts0 = gf::kTimePoints + d.srcFirst;
+            double line = 0.0;
+            for (int k = 0; k < d.srcCount; ++k) {
+                if (pts0[k].seg != gf::TSeg::Jump || pts0[k].x >= d.lengthBeats - 1e-9) continue;
+                closest = std::min(closest, pts0[k].x - line);
+                line = pts0[k].x;
+            }
+            closest = std::min(closest, d.lengthBeats - line);
+        }
+        CHECK(closest >= static_cast<double>(kFade) / kBeat * (999.0 / 120.0));   // 220 samples at 999 BPM, in beats
+    }
+    const double hz = 457.0, bound = clickBound(hz, 1.0);
+    const size_t S = at(3.0);
+    const Buf in = sine(hz, static_cast<int>(S + at(4.0)), 0.5f);
+    const auto run = [&](int p, size_t to) {
+        TimeCore c;
+        CHECK(c.allocate());
+        c.useLibrary(defs, 4, pts);
+        Buf L = in, R = in;
+        play(c, L, R, 0, to, p, 3.0);
+        L.resize(to);   // (the rest is the input, untouched)
+        return L;
+    };
+    const double sg = 60.0;   // g in samples
+    {   // 0: the three jumps; the head ends on the last one's place, one 220-sample fade after the fade the first of the two waited for
+        const Buf out = run(0, S + at(2.5));
+        const size_t j1 = S + at(0.5);
+        const double top = maxStep(out, 2, out.size());
+        CHECK(top <= bound);
+        if (!(top <= bound)) std::printf("  close jumps: a step of %.4f, the bound %.4f\n", top, bound);
+        bool live = true, last = true;
+        for (size_t i = 0; i + kFade + 2 < j1; ++i)
+            if (!near(out[i], in[i], 1e-5)) live = false;
+        // after the last jump: lag 0.15 + 2 g beats; the second jump's fade began on its line (j1 + 60), the third waited for its end
+        const double lag = (0.15 + 2.0 * sg / kBeat) * kBeat;
+        for (size_t i = j1 + static_cast<size_t>(sg) + 2 * kFade + 4; i + kFade + 2 < S + at(2.0); ++i)
+            if (!near(out[i], interp(in, static_cast<double>(i) - lag), 1e-4)) last = false;   // (the points are floats: 4e-5 off)
+        CHECK(live);
+        CHECK(last);
+    }
+    {   // 1: the end 80 samples after a jump: a fade to the live input from the end, which the jump does not disturb
+        const Buf out = run(1, S + at(2.0));
+        const size_t E = S + at(1.0);
+        const double top = maxStep(out, 2, out.size());
+        CHECK(top <= bound);
+        if (!(top <= bound)) std::printf("  jump before the end: a step of %.4f, the bound %.4f\n", top, bound);
+        bool live = true;
+        for (size_t i = E + kFade + 2; i < E + at(0.5); ++i)
+            if (!near(out[i], in[i], 1e-5)) live = false;
+        CHECK(live);
+    }
+    {   // 2: the same going round: the wrap is a fade to the next lap's start, and the lap goes on
+        const Buf out = run(2, S + at(3.0));
+        const size_t E = S + at(1.0);
+        const double top = maxStep(out, 2, out.size());
+        CHECK(top <= bound);
+        if (!(top <= bound)) std::printf("  jump before the wrap: a step of %.4f, the bound %.4f\n", top, bound);
+        bool live = true;
+        for (size_t i = E + kFade + 2; i + kFade + 2 < E + at(1.0) - 100; ++i)   // the second lap's live stretch
+            if (!near(out[i], in[i], 1e-5)) live = false;
+        CHECK(live);
+    }
+    {   // 3: a jump 60 samples after the start, as the pre-roll ends: the head lands 60 samples behind
+        const Buf out = run(3, S + at(2.0));
+        const double top = maxStep(out, 2, out.size());
+        CHECK(top <= bound);
+        if (!(top <= bound)) std::printf("  jump after the start: a step of %.4f, the bound %.4f\n", top, bound);
+        bool back = true;
+        for (size_t i = S + static_cast<size_t>(sg) + kFade + 4; i + kFade + 2 < S + at(1.0); ++i)
+            if (!near(out[i], interp(in, static_cast<double>(i) - sg), 2e-5)) back = false;
+        CHECK(back);
+    }
+}
+
 // --- the grooves (Time) --------------------------------------------------------------------------
 // Time is the engine with a lag that follows the groove. Its tests put a click on the grid and read
 // where it is heard: a click through the 4-point Hermite read keeps its weight (1) and its first moment, so
@@ -1668,6 +1857,8 @@ void timeTests() {
     timeAllocate();
     timeReset();
     timeRobust();
+    timeJumpInFade();
+    timeCloseJumps();
     timeSwing();
     timeSwingCrossfade();
     timeDrunk();

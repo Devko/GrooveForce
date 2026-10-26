@@ -40,6 +40,13 @@
 // change end on a line). A change that moves the playhead by less than half a
 // frame needs no crossfade.
 //
+// A jump inside a fade waits for it (at most 5 ms late). A crossfade is never restarted, which would step: if the
+// playhead jumps again while one is going, the head goes on where it was heading until the fade is over, and the jump is
+// made then, from there, however many came meanwhile. A pattern's own jump is scheduled (its fade ends on its line) when it
+// has 5 ms to itself, that is, when the line before it (the previous Jump, or the pattern's start) is 5 ms or more back; the
+// library's are (its closest are 331 samples apart at 999 BPM, the fastest tempo). One that has not is made at its line, as a
+// jump nothing foresaw, and waits like one; so does an end or a lap's wrap with a Jump less than 5 ms before it.
+//
 // With no pattern in range, a lag of 0 and nothing fading, process() leaves the input alone: bit for bit,
 // while the ring records.
 //
@@ -94,12 +101,21 @@ public:
     double slope(double x) const;                                  // dy/dx going on from x
     // The first Jump after x: its x (HUGE_VAL if none), where it lands and the slope from there.
     double nextJump(double& landsAt, double& slopeAfter);
+    // How far that Jump is from the line before it (the one before, or the start): the room a crossfade ending on it has.
+    double nextGap() const { return gap_; }
+    // Whether the last seek() went over a Jump (a line between the last x and this), and that line's gap.
+    bool crossed() const { return crossed_; }
+    double crossGap() const { return crossGap_; }
 
 private:
     double slopeOf(int k) const;   // the segment k -> k + 1, from its start
+    double gapOf(int jq) const;    // the Jump at point jq: its x less the x of the Jump before it, or of the start
     const TPoint* p_ = nullptr;
     int n_ = 0, i_ = 0;            // the segment: p_[i_].x <= x < p_[i_ + 1].x
     int jq_ = -1;                  // the first Jump's point after i_ (n_: none), or -1 for not looked for yet
+    double gap_ = HUGE_VAL;        // of that Jump
+    bool crossed_ = false;
+    double crossGap_ = HUGE_VAL;
 };
 
 class TimeCore {
@@ -127,7 +143,8 @@ public:
     //
     // For a caller (Time is the first):
     //  - A change of lagBeats between calls is not scheduled: it crossfades over the kFade samples from this call's
-    //    first sample. To end on a line, start a call at line - kFade (cut the chunk there) with the new lag.
+    //    first sample. To end on a line, start a call at line - kFade (cut the chunk there) with the new lag. If a
+    //    crossfade is going when it comes, it (like any jump: a pattern change, a locate) waits for its end, at most 5 ms.
     //  - Keep passing `pattern` through the chunk that contains its end: the crossfade back to lagBeats is inside it.
     //    A loopable pattern repeats for as long as it is passed, so stop passing it at its length for a one shot.
     //  - patternStart is in the song position's beats while the transport plays, and in nextBeat()'s clock while it is
@@ -136,6 +153,11 @@ public:
 
     // Where the next chunk starts on the clock a pattern's start is measured on while the transport is stopped.
     double nextBeat() const { return clock_; }
+
+    // The patterns the core plays: the generated library, unless a test points it at its own (idle calls only; `defs` and
+    // `points` outlive the use; nullptr goes back to the generated one). The surface checks the generated library;
+    // this is how the engine is tried on curves the library would not let through.
+    void useLibrary(const TimePatternDef* defs, int count, const TPoint* points);
 
 private:
     struct Store {
@@ -148,6 +170,7 @@ private:
         float gain = 1.0f;               // the speed's: min(8 |speed|, 1), the two heads' alike
         float speed = 1.0f;              // frames a sample, of the head that carries on
         float vol = 1.0f;                // the pattern's volume, kEdge samples ahead
+        bool cut = false;                // a line with no 5 ms of its own to fade in went by at this sample: the head may have jumped
     };
 
     void bind(int pattern);
@@ -164,13 +187,19 @@ private:
 
     double clock_ = 0.0;            // the song position the next chunk starts at, if the transport does not say
 
+    // The patterns: the generated ones unless a test brought its own.
+    const TimePatternDef* defs_ = nullptr;
+    const TPoint* points_ = nullptr;
+    int numDefs_ = 0;
+
     // The pattern bound, and what it says about its start.
     int pat_ = -1;
     double len_ = 0.0;
     bool loop_ = false;
     double s0_ = 0.0, d0_ = 1.0;    // the source at the start, and its slope going on
     TimeCurve src_, vol_;
-    double tfb_ = 0.0, leadB_ = 0.0;   // the crossfade and the volume's look-ahead, in beats at this chunk's tempo
+    double endGap_ = 0.0;           // how far the end is from the line before it (the last Jump, or the start)
+    double tfb_ = 0.0, leadB_ = 0.0, bps_ = 0.0;   // the crossfade and the volume's look-ahead, and a sample, in beats at this chunk's tempo
 
     // What the last chunk ended on, to tell a chunk that follows on from one that does not.
     bool fresh_ = true;
@@ -184,6 +213,11 @@ private:
     double u_ = 0.0;
     float uSpeed_ = 1.0f;
     int fade_ = 0;
+    // A jump that comes while that crossfade is going waits for its end: the head goes on where it was heading (hp_, at hs_)
+    // for what is left of the fade, and then the jump is made, from there.
+    bool held_ = false;
+    double hp_ = 0.0;
+    float hs_ = 1.0f;
 
     float g_ = 1.0f;                // the gain
 };
@@ -202,11 +236,9 @@ private:
 // groove's at the position 5 ms on. A line that falls inside a chunk cuts the chunk there, as many pieces as there are
 // lines in it (usually one), and the piece after the cut asks the new lag. A line is reached by the first sample at or
 // after it (a thousandth of a sample's slack, so a line that falls exactly on a sample is that sample's).
-// TimeCore cannot nest two crossfades (a second restarts from where the first was heading, a click if they differ), so
-// a change of lag that the groove did not schedule (a knob, a groove switched, a pattern's end close behind another
-// change) waits for the crossfade going on to end; a change of less than half a frame, which TimeCore makes without
-// one (a tempo ramp moving a swing's lag), neither waits nor makes the rest wait. The groove's lines are far enough
-// apart not to wait for each other (a unit is 15 ms at the fastest tempo).
+// A change of lag the groove did not schedule (a knob, a groove switched, a pattern's end close behind another change)
+// that comes while a crossfade is going waits for its end: TimeCore defers a jump inside a fade (see its header comment).
+// The groove's lines are far enough apart not to wait for each other (a unit is 15 ms at the fastest tempo).
 //
 // Drunk: a lag per 16th, from a hash of the 16th's index in its bar (0..amount * 15 ms), so it is the same on every bar and
 // wherever MPC loops; each change ends on its 16th's line. Push: a constant lag of amount * 20 ms. Off: no lag, and with
@@ -261,7 +293,6 @@ private:
         int pattern;     // -1 none
         double start;    // the pattern's start (a lap's, when it goes round a lap at a time)
         int m;
-        bool changes;    // this piece asks a new lag (its crossfade starts at its first sample)
     };
 
     Piece pieceAt(int i, int n);
@@ -278,7 +309,6 @@ private:
     double qBase_ = 0.0;         // pos_ + the crossfade + the slack: where the chunk's first sample asks the groove
     bool fresh_ = true;          // the next set() seeds the position from MPC's
     double lastLag_ = 0.0;       // the lag asked in the last piece, in samples (a tempo change leaves it be): held while a pattern plays
-    int age_ = TimeCore::kFade;  // samples since the last change of lag started: below kFade it is still crossfading
 
     // What ended a pattern: the groove waits (lag 0) from there to the next unit line.
     bool armed_ = false;         // the last set() had a pattern
