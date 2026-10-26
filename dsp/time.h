@@ -96,6 +96,11 @@ double timeSpeedAt(int pattern, double x);
 float timeVolumeAt(int pattern, double x);
 double timeNextJump(int pattern, double x0, double x1);
 
+// The weight of a crossfade's incoming side when `remaining` (0..1, clamped) of it is still to go: 0.5 + 0.5 cos(pi r), 1 at 0
+// (done) and 0 at 1 (about to begin). From a table with linear steps, within 1e-7 of the cosine (a float's own rounding is 6e-8 at 1):
+// the playhead asks for it every sample of a fade, and a cosine of a double is a hundred instructions and a libm call.
+float timeFadeWeight(double remaining);
+
 // One curve and a cursor into it: x mostly grows from one call to the next, so the segment it was in is
 // where to look. seek(x) first; value / slope / nextJump read the segment seek found.
 class TimeCurve {
@@ -111,16 +116,28 @@ public:
     // Whether the last seek() went over a Jump (a line between the last x and this), and that line's gap.
     bool crossed() const { return crossed_; }
     double crossGap() const { return crossGap_; }
+    // The segment the cursor is on: where it starts and ends, whether it is a straight line (a Line: its y is y0 + (x - x0) dy / dx).
+    double segStart() const { return x0_; }
+    double segEnd() const { return x1_; }
+    double segY0() const { return y0_; }
+    double segRise() const { return rise_; }   // dy / dx
+    bool isLine() const { return p_[i_].seg == TSeg::Line; }
 
 private:
     double slopeOf(int k) const;   // the segment k -> k + 1, from its start
     double gapOf(int jq) const;    // the Jump at point jq: its x less the x of the Jump before it, or of the start
+    void land();                   // the numbers of the segment the cursor is on, worked out once (see below)
     const TPoint* p_ = nullptr;
     int n_ = 0, i_ = 0;            // the segment: p_[i_].x <= x < p_[i_ + 1].x
     int jq_ = -1;                  // the first Jump's point after i_ (n_: none), or -1 for not looked for yet
     double gap_ = HUGE_VAL;        // of that Jump
     bool crossed_ = false;
     double crossGap_ = HUGE_VAL;
+    // The segment p_[i_] -> p_[i_ + 1] as numbers, worked out when the cursor lands on it, so that the per-sample calls divide
+    // nothing: its ends, dy / dx (what value() adds a unit of x), and the speed a Line moves at (a Jump, a Smooth segment: none here).
+    double x0_ = 0.0, x1_ = 0.0, y0_ = 0.0, y1_ = 0.0, rise_ = 0.0, line_ = 0.0;
+    // The Jump jq_ points at, as nextJump() hands it back.
+    double jumpX_ = 0.0, lands_ = 0.0, slopeAfter_ = 1.0;
 };
 
 class TimeCore {
@@ -180,10 +197,31 @@ private:
         bool cut = false;                // a line with no 5 ms of its own to fade in went by at this sample: the head may have jumped
     };
 
+    // A stretch of the pattern over which headsAt()'s answer is a formula in x, kept so that the samples that follow the one it was
+    // worked out for do not look it all up again (the cursors, the next line, the volume): inside one segment of the source,
+    // before the next line's fade begins (or in it), in one straight piece of the volume, they are the same arithmetic without the
+    // lookups. Not valid (lo >= hi) until a sample has found one, and when the pattern or the tempo changes.
+    struct Stretch {
+        double lo = 0.0, hi = 0.0;       // x in [lo, hi)
+        double off = 0.0;                // xl = x - off: the start of the lap, when the pattern goes round
+        double x0 = 0.0, y0 = 0.0, rise = 0.0;   // the source segment: y = y0 + rise (xl - x0)
+        float speed = 1.0f, gain = 1.0f;
+        float vol = 1.0f;                           // the volume, where its segment is flat (vrise 0)
+        double vx0 = 0.0, vy0 = 0.0, vrise = 0.0;   // else a straight piece: vol = vy0 + vrise (xl + the look-ahead - vx0)
+        int fade = 0;                    // 0: none; else head 1 fades in, its lag by kind: 1 after a Jump, 2 the next lap, 3 the lag asked for
+        double line = 0.0, lands = 0.0, slopeAfter = 1.0;   // the line the fade ends on, where the Jump lands and the slope from there
+        float speed1 = 1.0f, gain1 = 1.0f;
+    };
+
     void bind(int pattern);
-    void headsAt(bool inPattern, double x, double lag, Heads& h);
+    void headsAt(bool inPattern, double x, double lag, Heads& h);       // (inline: a run's sample)
+    void headsLookup(bool inPattern, double x, double lag, Heads& h);   // and the lookup, for the sample that finds a run
     float volumeAt(double x);
-    void read(double pos, int64_t last, float& l, float& r) const;
+    // The ring `back` frames behind the sample being played (4-point Hermite), which is `now`: a whole number, nowD in a double and its
+    // low 32 bits in now32. availD is how far back what was recorded reaches (a whole number: frames before now, less the one the
+    // Hermite reads behind). Nothing after now is read: a frame that would be is now's.
+    void read(double back, double nowD, double availD, uint32_t now32, float& l, float& r) const;   // (inline: the usual case)
+    void readEdge(double back, double nowD, float& l, float& r) const;                              // and the edges of what was recorded
     const float* tap(int64_t a, int64_t last) const;
 
     std::atomic<Store*> store_{nullptr};
@@ -207,6 +245,8 @@ private:
     TimeCurve src_, vol_;
     double endGap_ = 0.0;           // how far the end is from the line before it (the last Jump, or the start)
     double tfb_ = 0.0, leadB_ = 0.0, bps_ = 0.0;   // the crossfade and the volume's look-ahead, and a sample, in beats at this chunk's tempo
+    double invTfb_ = 0.0;                          // 1 / tfb_
+    Stretch run_;
 
     // What the last chunk ended on, to tell a chunk that follows on from one that does not.
     bool fresh_ = true;

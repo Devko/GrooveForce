@@ -220,6 +220,99 @@ void timeEvaluator() { // the evaluator's laws on patterns whose curves are know
     CHECK(gf::timeSourceAt(rev, -1.0) == 0.0 && near(gf::timeSourceAt(rev, 3.0), 1.0, 1e-12));
 }
 
+// The crossfade's weight comes from a table (a cosine of a double in every sample of a fade was the Move's costliest line):
+// the raised cosine to 1.2e-7 (a float's own rounding is 6e-8 at 1), falling from 1 to 0, held to 0..1.
+void timeFadeWeights() {
+    double worst = 0.0;
+    bool falling = true;
+    float prev = 2.0f;
+    for (int k = 0; k <= 100000; ++k) {
+        const double r = k / 100000.0;
+        const float w = gf::timeFadeWeight(r);
+        worst = std::max(worst, std::fabs(static_cast<double>(w) - (0.5 + 0.5 * std::cos(kPi * r))));
+        falling = falling && w <= prev + 1e-7f;
+        prev = w;
+    }
+    CHECK(worst < 1.2e-7);
+    CHECK(falling);
+    CHECK(gf::timeFadeWeight(0.0) == 1.0f && gf::timeFadeWeight(1.0) == 0.0f && near(gf::timeFadeWeight(0.5), 0.5, 1e-7));
+    CHECK(gf::timeFadeWeight(-0.5) == 1.0f && gf::timeFadeWeight(7.0) == 0.0f && gf::timeFadeWeight(std::nan("")) == 1.0f);
+}
+
+// A curve evaluated as the engine did before it kept the numbers of the segment it stands on: a division at every call.
+double refValue(const gf::TPoint* p, int n, double x) {
+    if (!(x >= p[0].x)) return p[0].y;
+    int i = 0;
+    while (i + 2 < n && x >= p[i + 1].x) ++i;
+    const gf::TPoint &a = p[i], &b = p[i + 1];
+    if (x >= b.x) return b.y;
+    if (!(x > a.x)) return a.y;
+    return a.y + (static_cast<double>(b.y) - a.y) * ((x - a.x) / (static_cast<double>(b.x) - a.x));
+}
+double refSlope(const gf::TPoint* p, int n, double x) {
+    int i = 0;   // (before the start the cursor stands on the first segment)
+    while (i + 2 < n && x >= p[i + 1].x) ++i;
+    const gf::TPoint &a = p[i], &b = p[i + 1];
+    if (x >= b.x || !(b.x > a.x)) return 0.0;
+    return a.seg == gf::TSeg::Line ? (static_cast<double>(b.y) - a.y) / (static_cast<double>(b.x) - a.x) : 0.0;
+}
+
+// The numbers a curve keeps for its segment (its width's reciprocal, its slope, the Jump it heads for) give what dividing at every call
+// gave, to rounding, for every pattern of the library, going forward and jumping about: a locate sends the cursor back.
+void timeCurveNumbers() {
+    uint32_t seed = 7u;
+    const auto rnd = [&seed] {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<double>(seed >> 8) / 16777216.0;
+    };
+    double worst = 0.0, worstSlope = 0.0;
+    for (int p = 0; p < gf::numTimePatterns(); ++p) {
+        const gf::TimePatternDef& d = gf::timePatternDef(p);
+        for (int vol = 0; vol < 2; ++vol) {
+            const gf::TPoint* pts = gf::kTimePoints + (vol ? d.volFirst : d.srcFirst);
+            const int n = vol ? d.volCount : d.srcCount;
+            gf::TimeCurve c;
+            c.bind(pts, n);
+            const double len = d.lengthBeats;
+            double x = -0.05;
+            for (int k = 0; k < 4000; ++k) {
+                x = k % 7 == 6 ? (rnd() * 1.2 - 0.1) * len : x + len / 3000.0;   // forward, with a locate now and then
+                c.seek(x);
+                worst = std::max(worst, std::fabs(c.value(x) - refValue(pts, n, x)));
+                if (!vol) worstSlope = std::max(worstSlope, std::fabs(c.slope(x) - refSlope(pts, n, x)));
+            }
+        }
+    }
+    CHECK(worst < 1e-12);
+    CHECK(worstSlope < 1e-12);
+}
+
+// What a sample finds in the run an earlier sample left (the formulas of its segment, ready) is what it would have found by looking it
+// up: sample for sample, bit for bit. Binding the pattern again before every sample leaves no run to find.
+void timeRuns() {
+    for (const char* name : {"Roll Build 1 Bar", "Stutter 1/16", "Reverse Beat", "Gate 1/16", "Tape Stop", "Spin-Back"})
+        for (const double bpm : {120.0, 174.0}) {
+            const int p = idx(name);
+            const double spb = kRate * 60.0 / bpm;
+            const Buf in = mixture(static_cast<int>(1.6 * spb));
+            const auto render1 = [&](bool lookEach) {
+                TimeCore c;
+                CHECK(c.allocate());
+                Buf L = in, R = in;
+                for (size_t i = 0; i < in.size(); ++i) {
+                    if (lookEach) c.useLibrary(gf::kTimePatterns, gf::kNumTimePatterns, gf::kTimePoints);
+                    Transport t;
+                    t.bpm = bpm;
+                    t.beats = static_cast<double>(i) / spb;
+                    t.playing = t.valid = true;
+                    c.process(&L[i], &R[i], 1, t, p, 0.5, 0.0);
+                }
+                return L;
+            };
+            CHECK(same(render1(false), render1(true)));
+        }
+}
+
 // --- the playhead ------------------------------------------------------------------------------
 
 void timeRest() {      // no pattern, lag 0: output == input bit for bit, whatever the chunks; and the ring records
@@ -2023,6 +2116,9 @@ void timeGrooveRobust() { // wild parameters and transports: finite, in range, n
 void timeTests() {
     timeData();
     timeEvaluator();
+    timeFadeWeights();
+    timeCurveNumbers();
+    timeRuns();
     timeRest();
     timeLag();
     timeJumpEndsOnLine();
