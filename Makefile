@@ -141,6 +141,17 @@ $(BUILD)/grooveforce.so: $(SRC) $(HDR) $(GEN) plugin/exports.map | $(BUILD)
 $(BUILD)/gfbench: tools/bench.cpp $(HDR) $(GEN) | $(BUILD)
 	$(CXX) -std=c++17 -O2 -Wall -Wextra $(INC) $< -ldl -o $@
 
+# Level-matching (tools/levels.cpp): every factory preset's Output set so the reference mix of its category (the
+# kick for Kick, the bass line and the kick for Bass, ...: tools/reference_mix.h) comes out as loud as it went in.
+# `levels` reports, `preset-levels` writes the presets' output= lines and regenerates.
+$(BUILD)/gflevels: tools/levels.cpp tools/reference_mix.h plugin/vst2.h | $(BUILD)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra $< -ldl -o $@
+levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
+	$(BUILD)/gflevels $(BUILD)/grooveforce.so presets/Factory
+preset-levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
+	$(BUILD)/gflevels $(BUILD)/grooveforce.so presets/Factory --write
+	python3 $(SURF)/surface.py
+
 # --- device -----------------------------------------------------------------------------------
 # The .so MPC loads: only VSTPluginMain exported (a version script hides the C++ template
 # instantiations and typeinfo -fvisibility leaves; -fno-gnu-unique keeps it unloadable);

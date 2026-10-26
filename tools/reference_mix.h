@@ -1,22 +1,24 @@
 #pragma once
-// EffectForce's reference material (its tools/loudness.h, by way of MasterForce's tools/reference_mix.h,
-// unchanged but for this note): the mix the profile-guided build's trainer plays through the plugin. (EffectForce
-// level-matches its presets with it; here only the trainer plays it.)
+// The reference material and the loudness measure the factory presets are level-matched with
+// (tools/levels.cpp sets their Output) and the profile-guided build's trainer plays (tools/pgo_train.cpp).
+// From EffectForce's tools/loudness.h; here the parts are the groove's own.
 //
 // The material: four bars at 120 BPM of chords (detuned saws), a bass line (square), kick, snare and
-// hats, 8 s. Each category plays what it is made for (a lead preset with a low cut isn't judged on a
-// kick drum): Synth, Pads, Texture and Rhythm the chords, Bass the bass line, Drums the drums, the rest all
-// of it.
+// hats, 8 s. Each category plays what it is made for (a kick preset isn't judged on the chords, a chord
+// gate not on the hats): Kick the kick alone, Bass the bass line and the kick, Hats + Perc the hats and
+// the snare, Chords the chords, Drum Bus the kick, snare and hats, the rest (Perform, Echo, Utility) all of it.
 // Whatever the parts, the reference plays at kRefLufs with its peaks under -1 dBFS: the level a track
-// reaches an insert at, so compressors and drives work as they would on it. Loudness: ITU-R BS.1770
-// K-weighting (the shelf and the high-pass, as libebur128 derives them), both sides, the whole signal.
+// reaches an insert at, so a Pump or a Shape works on it as it would on one. (Where the snare's peaks come
+// first, in Hats + Perc, Drum Bus and the full mix, the peak limit holds and the reference ends up 0.4 to 0.6 dB
+// under kRefLufs.) Loudness: ITU-R BS.1770 K-weighting (the shelf and the high-pass, as libebur128 derives
+// them), both sides, the whole signal.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace efl {
+namespace gfl {
 
 constexpr double kSr = 44100.0;
 constexpr double kPi = 3.14159265358979323846;
@@ -58,13 +60,16 @@ inline double lufs(const std::vector<float>& L, const std::vector<float>& R) {
     return -0.691 + 10.0 * std::log10(std::max(sum / static_cast<double>(std::max<size_t>(L.size(), 1)), 1e-20));
 }
 
-enum Part : int { CHORDS = 1, BASS = 2, DRUMS = 4, ALL = 7 };
+enum Part : int { CHORDS = 1, BASS = 2, KICK = 4, SNARE = 8, HATS = 16, DRUMS = KICK | SNARE | HATS, ALL = CHORDS | BASS | DRUMS };
 
-// The parts a factory category is matched on (its folder name without the number).
+// The parts a factory category is matched on: its name as the browser shows it (the folder "03_Hats_+_Perc"
+// is "Hats + Perc"). A category this doesn't know gets the whole mix, as Perform, Echo and Utility do.
 inline int partsFor(const std::string& category) {
-    if (category == "Synth" || category == "Pads" || category == "Texture" || category == "Rhythm") return CHORDS;
-    if (category == "Bass") return BASS;
-    if (category == "Drums") return DRUMS;
+    if (category == "Kick") return KICK;
+    if (category == "Bass") return BASS | KICK;
+    if (category == "Hats + Perc") return HATS | SNARE;
+    if (category == "Chords") return CHORDS;
+    if (category == "Drum Bus") return DRUMS;
     return ALL;
 }
 
@@ -105,9 +110,10 @@ inline void referenceMix(std::vector<float>& L, std::vector<float>& R, int parts
         const double hn = noise();
         hatLp += 0.5 * (hn - hatLp);
         const double hat = 0.06 * (hn - hatLp) * std::exp(-eighth * 120.0);
-        const double c = parts & CHORDS ? 1.0 : 0.0, bs = parts & BASS ? 1.0 : 0.0, d = parts & DRUMS ? 1.0 : 0.0;
-        L[i] = static_cast<float>(c * cl + bs * b + d * (kick + snare + hat * 1.2));
-        R[i] = static_cast<float>(c * cr + bs * b + d * (kick + snare * 0.9 + hat));
+        const double c = parts & CHORDS ? 1.0 : 0.0, bs = parts & BASS ? 1.0 : 0.0, k = parts & KICK ? 1.0 : 0.0,
+                     sn = parts & SNARE ? 1.0 : 0.0, h = parts & HATS ? 1.0 : 0.0;
+        L[i] = static_cast<float>(c * cl + bs * b + k * kick + sn * snare + h * hat * 1.2);
+        R[i] = static_cast<float>(c * cr + bs * b + k * kick + sn * snare * 0.9 + h * hat);
     }
     double pk = 0.0;
     for (size_t i = 0; i < n; ++i) pk = std::max(pk, static_cast<double>(std::max(std::fabs(L[i]), std::fabs(R[i]))));
@@ -118,4 +124,4 @@ inline void referenceMix(std::vector<float>& L, std::vector<float>& R, int parts
     }
 }
 
-} // namespace efl
+} // namespace gfl
