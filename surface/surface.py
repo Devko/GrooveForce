@@ -1652,6 +1652,12 @@ def _set(key, option, at=(0.0, 1.0)):
     return dict(key=key, kind="set", value=option, shape="hold", frm=float(at[0]), to=float(at[1]))
 
 
+def _real(key, change):
+    """A linear parameter's travel for a change of `change` in its own units (R37): echo_fb +0.3 is +0.15 of its -1..1."""
+    p = PARAMS[key]
+    return change / (p["hi"] - p["lo"])
+
+
 def _octaves(key, n):
     """A log parameter's travel for `n` octaves up (down if negative): its 0..1 value is log(v / lo) / log(hi / lo)."""
     return n * math.log(2.0) / math.log(PARAMS[key]["hi"] / PARAMS[key]["lo"])
@@ -1665,8 +1671,8 @@ def _move(name, pattern=None, length=None, parts=(), ramps=()):
 
 
 def _throw(name, length):
-    """The Echo's send open for the whole Move and its feedback up (+0.3 of its travel): a beat or a bar goes in and rings."""
-    return _move(name, length=length, parts=("echo",), ramps=[_add("echo_send", 1.0), _add("echo_fb", 0.3)])
+    """The Echo's send open for the whole Move and its feedback up by 0.3 (in the offset's own -1..1 units): a beat or a bar goes in and rings."""
+    return _move(name, length=length, parts=("echo",), ramps=[_add("echo_send", 1.0), _add("echo_fb", _real("echo_fb", 0.3))])
 
 
 MOVES = [
@@ -1674,7 +1680,7 @@ MOVES = [
     _throw("Throw Bar", BAR),
     # a beat goes into the Echo (the send open, the feedback up so the lines take it), then the lines are frozen for a bar
     _move("Dub Freeze", length=BAR + 1.0, parts=("echo",),
-          ramps=[_add("echo_send", 1.0, at=(0.0, 0.2)), _add("echo_fb", 0.3, at=(0.0, 0.2)), _set("echo_freeze", "On", at=(0.2, 1.0))]),
+          ramps=[_add("echo_send", 1.0, at=(0.0, 0.2)), _add("echo_fb", _real("echo_fb", 0.3), at=(0.0, 0.2)), _set("echo_freeze", "On", at=(0.2, 1.0))]),
     _move("Half-Time Bar", pattern="Half-Time Bar", parts=("time",)),
     _move("Tape Stop", pattern="Tape Stop", parts=("time",)),
     _move("Slow Down", pattern="Slow Down", parts=("time",)),

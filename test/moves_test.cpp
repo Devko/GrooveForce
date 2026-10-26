@@ -144,13 +144,14 @@ void moveAnchors() {
         return nullptr;
     };
     const auto pure = [](const char* mvName) { return gf::moveDef(move(mvName)).rampCount == 0; };
-    // Throws: the Echo's send to 1 for the length (an Add of the whole travel, held), the feedback +0.3, the Echo switched on
+    // Throws: the Echo's send to 1 for the length (an Add of the whole travel, held), the feedback +0.3 in its own units
+    // (-1..1: +0.15 of its travel, R37), the Echo switched on
     for (const char* n : {"Throw Beat", "Throw Bar"}) {
         const MoveDef& d = gf::moveDef(move(n));
         const MoveRamp* s = ramp(n, P_SEND);
         const MoveRamp* f = ramp(n, P_FB);
         CHECK(s && s->kind == gf::kMoveAdd && s->amount == 1.0f && s->shape == gf::kMoveHold && s->from == 0.0f && s->to == 1.0f);
-        CHECK(f && f->kind == gf::kMoveAdd && near(f->amount, 0.3, 1e-6) && f->shape == gf::kMoveHold);
+        CHECK(f && f->kind == gf::kMoveAdd && near(f->amount, 0.15, 1e-6) && f->shape == gf::kMoveHold);
         CHECK(d.partsOn == gf::kPartEcho && d.timePattern < 0 && d.rampCount == 2);
     }
     CHECK(gf::moveDef(move("Throw Beat")).lengthBeats == 1.0f && gf::moveDef(move("Throw Bar")).lengthBeats == 4.0f);
@@ -301,12 +302,12 @@ void moveRampsReturn() {
     CHECK(up >= 0.0 && up <= 1.0 && 1.0 < up + kChunkBeats);     // the chunk the line is in
     CHECK(full > up && full <= up + 2.0 * kChunkBeats + 1e-9);    // and 1 ms later all of it
     r.run(1.5);
-    CHECK(r.out[P_SEND] == 1.0f && near(r.out[P_FB], 0.8, 1e-6));   // +0.3 of the travel
+    CHECK(r.out[P_SEND] == 1.0f && near(r.out[P_FB], 0.65, 1e-6));   // +0.15 of the travel: +0.3 of the offset
     CHECK(r.m.playing() == tb);
     bool held = true;
     while (r.beats < 1.99) {
         r.step();
-        held = held && r.out[P_SEND] == 1.0f && near(r.out[P_FB], 0.8, 1e-6);
+        held = held && r.out[P_SEND] == 1.0f && near(r.out[P_FB], 0.65, 1e-6);
     }
     CHECK(held);
     // the end: the first chunk at beat 2 starts the glide back; down 10 ms later, steadily
@@ -496,7 +497,7 @@ void moveSetOption() {
     r.base[gf::P_ECHO_FREEZE] = 0.0f;
     r.m.fire(df, Moves::kOneShot, Moves::kBar);   // line 0; the pulse is beat 0, the freeze beats 1 to 5
     r.run(0.5);
-    CHECK(r.out[P_SEND] == 1.0f && near(r.out[P_FB], 0.8, 1e-6) && r.out[gf::P_ECHO_FREEZE] == 0.0f);   // the pulse, not frozen yet
+    CHECK(r.out[P_SEND] == 1.0f && near(r.out[P_FB], 0.65, 1e-6) && r.out[gf::P_ECHO_FREEZE] == 0.0f);   // the pulse, not frozen yet
     r.run(0.99);
     CHECK(r.out[gf::P_ECHO_FREEZE] == 0.0f && r.out[P_SEND] == 1.0f);
     r.run(1.01);

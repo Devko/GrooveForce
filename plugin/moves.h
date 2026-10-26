@@ -23,7 +23,8 @@
 //   quickest edge); a Set returns at once (an option has no between: the part it belongs to fades itself).
 //
 //   Parts. A Move switches on the parts it needs (Throw the Echo, a Time pattern Time) from 20 ms before its line (twice
-//   a part's fade, so it is in before the Move is) until it ends. A part that is on already stays on.
+//   a part's fade, so it is in before the Move is) until it ends. A part that is on already stays on. apply() switches
+//   them on for the Move only: the Engine keeps one running until its tail has rung out (an Echo after a Throw).
 //
 //   Time. apply() says what Time should play: the pattern, where it started on the grid (the line; in a Loop, the start
 //   of the lap) and whether the Move goes round. The pattern is handed over 5 ms before the line (TimeCore's crossfade
@@ -57,7 +58,7 @@ struct MoveDef {
     int timePattern;     // an index into Time's patterns, -1: none
     float lengthBeats;   // a pattern's own length when there is one
     int rampFirst, rampCount;   // kMoveRamps[rampFirst ..]
-    int partsOn;         // MovePart bits
+    int partsOn;         // MovePart bits: on for the Move; the Engine keeps a part on until its tail rings out (R38)
 };
 
 constexpr int kMaxMoveRamps = 4;
