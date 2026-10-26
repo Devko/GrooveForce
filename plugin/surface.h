@@ -21,7 +21,9 @@
 // The Moves (R35). The Move parameter holds the selected Move and stays on it when the Move is over. A change of it, a tap
 // on one of the 16 Move tiles and GO are Moves to fire (or stop), and a preset or project load ends the one that plays: all
 // of them happen here, on the UI thread, and Moves::fire(), stop() and reset() belong to the audio thread, so they are
-// queued (takeMoveCall, in the order they were made; a queue of 16, the newest taking the last place if it ever fills). A
+// handed over (takeMoveCall) and they coalesce: the latest fire, GO or stop is the call, since it is the state the Moves are
+// to be in, and a load is a flag that is never lost and comes first (a fire or stop before it is ended by it; one after it
+// follows it). GO carries the Move that was selected when it was pressed. A
 // tile is tapped by flipping what MPC read back (the plugin lights the tiles of the Moves that play or wait for their line,
 // from the audio thread), and what follows a tap within a second on the same tile is MPC's release echo, not another.
 #include "library.h"
@@ -81,7 +83,8 @@ public:
     // The texts changed underneath (the status line, from the audio thread): MPC redraws them.
     void        textsChanged() { textGen_.fetch_add(1, std::memory_order_release); }
 
-    // The next Move call the UI thread made, in order; false when there is none. Once per call, before the block.
+    // The next Move call from the UI thread, a load first, then the latest of the others; false when there is none.
+    // Once per call, before the block.
     bool        takeMoveCall(MoveCall& out);
     // Every call waiting is forgotten (the plugin was switched off for a while, and comes back clean).
     void        dropMoveCalls();
@@ -105,7 +108,7 @@ private:
         std::vector<std::string> keys;
     };
     void apply(int i, float n);
-    void postMove(int kind, int move);          // UI thread (any one at a time): queue a Move call
+    void postMove(int kind, int move);          // UI thread: a Move call for the audio thread
     void tapMoveTile(int param, int move, bool on);   // MPC set a Move's tile to `on`
     int  stepIndex(int i, float n, int count, int cur);
     int  stepItem(float n, int normRange, int items, int cur);   // one item per event
@@ -132,11 +135,10 @@ private:
     std::atomic<uint32_t> changes_{0};     // bumped by every write to want_ / shown_ (notify's cue)
     std::atomic<int>      batchDepth_{0};
 
-    // The Move calls from the UI thread to the audio thread: a queue with one writer (UI) and one reader (audio). A call
-    // is its kind and its Move in a word. Full, the newest takes the last place (16 calls within one block never happen).
-    static constexpr uint32_t kMoveQueue = 16;
-    std::atomic<uint32_t> moveQ_[kMoveQueue];
-    std::atomic<uint32_t> moveHead_{0}, moveTail_{0};
+    // The Move calls from the UI thread to the audio thread, coalesced: the latest fire, GO or stop in one word (0: none; its
+    // kind plus one and its Move), and a load as a flag. The UI thread writes, the audio thread takes (exchange).
+    std::atomic<uint32_t> moveCall_{0};
+    std::atomic<bool>     moveLoad_{false};
 
     // Browser state + text cache (refresh writes, the UI thread reads).
     mutable std::mutex       mtx_;

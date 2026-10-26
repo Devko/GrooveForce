@@ -12,7 +12,7 @@
 // Threads: processReplacing runs on one of MPC's audio workers (which one changes between calls,
 // instances run concurrently); parameters, display text and chunks come from MPC's UI side. Host
 // callbacks are only made from processReplacing. What the UI side wants of the audio side goes through the surface: the
-// sound's parameters as snapshots, and the Moves' calls (a tile, GO, the Move parameter, a load) as a queue that runBlock
+// sound's parameters as snapshots, and the Moves' calls (a tile, GO, the Move parameter, a load) as calls that runBlock
 // hands to the engine before each block. The memory the Echo and Time need is made on the UI side (provide()) as the switch
 // is set, or the Move that needs it is selected, and the audio side takes it up when it has arrived.
 #ifndef _GNU_SOURCE

@@ -20,6 +20,7 @@ void grooveTests();
 void echoModTests();
 void movesTests();
 void pluginTests();
+void pluginMovesTests();
 void echoLineTests();
 void echoTests();
 
@@ -37,6 +38,7 @@ int main() {
     echoModTests();
     movesTests();
     pluginTests();
+    pluginMovesTests();
     echoLineTests();
     echoTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);

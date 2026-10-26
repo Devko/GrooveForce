@@ -39,8 +39,8 @@ void Engine::fire(int move) {
 
 void Engine::moveCall(const MoveCall& call) {
     switch (call.kind) {
-        case MoveCall::kFire: fire(call.move); break;
-        case MoveCall::kGo: fire(pickOf(P_MOVE) - 1); break;   // (None selected: no Move)
+        case MoveCall::kFire:
+        case MoveCall::kGo: fire(call.move); break;   // (GO carries the Move it was pressed for)
         case MoveCall::kStop: moves_.stop(); break;
         case MoveCall::kLoad:   // the new sound is the sound: the Move ends, and nothing it had on is kept
             moves_.stop();
@@ -112,11 +112,19 @@ void Engine::render(float* L, float* R, int n, const ef::Transport& t) {
         bool loop = false;
         moves_.apply(norm, c, &pattern, &patternStart, &loop, len);
         keepEcho(norm, len);
-        if (!haveUsed_ || std::memcmp(norm, used_, sizeof norm) != 0) {
+        // The chain's parameters follow the snapshot with the Move on it (R53): a new snapshot at once, and what a Move's ramps
+        // change at most once in 128 frames, a block. A conversion costs about 8000 ARM instructions, so four in a block for a
+        // ramp that moves in every chunk cost 0.8% of it; every part glides a change over a millisecond or more, MPC's own
+        // automation arrives a block at a time, and a ramp that is 2.9 ms late is not heard. A Time pattern is not a parameter:
+        // it goes in every chunk, to the sample.
+        if (!haveUsed_ || (sinceConvert_ >= kConvertGap && std::memcmp(norm, used_, sizeof norm) != 0)) {
             params_ = grooveParams(norm);
+            ++conversions_;
             std::memcpy(used_, norm, sizeof used_);
             haveUsed_ = true;
+            sinceConvert_ = 0;
         }
+        sinceConvert_ = std::min(sinceConvert_ + len, kConvertGap);
         params_.time.pattern = pattern;
         params_.time.patternStart = patternStart;
         params_.time.loop = loop;

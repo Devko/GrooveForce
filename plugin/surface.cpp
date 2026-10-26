@@ -90,7 +90,6 @@ Surface::Surface() : texts_(P_COUNT) {
         release_[i].store(false);
         lastN_[i] = -1.0f;
     }
-    for (auto& call : moveQ_) call.store(0);
     presetLibrary().rescan();   // a new instance sees the preset files as they are now
     // A new instance is Init (every parameter at its default), so the stepper stands on it, wherever Init sorts.
     // The browser keeps to its first category instead of following it there.
@@ -167,7 +166,7 @@ void Surface::apply(int i, float n) {
                 const int pick = stepIndex(i, n, steps, cur);
                 put(i, static_cast<float>(pick) / static_cast<float>(steps));
                 // The Move parameter holds the selected Move: a change of it is a Move to fire at the quantize, None one to stop.
-                if (i == P_MOVE && pick != cur) postMove(pick == 0 ? MoveCall::kStop : MoveCall::kFire, pick - 1);
+                if (i == P_MOVE && pick != cur) postMove(pick == 0 ? MoveCall::kStop : MoveCall::kFire, std::max(pick - 1, 0));
                 if (exactOption(n, steps)) {   // a tap on a list row closes its popup (a Q-Link nudge doesn't)
                     const int flag = popupFlagOf(i);
                     if (flag >= 0) put(flag, 0.0f);
@@ -198,7 +197,10 @@ void Surface::apply(int i, float n) {
             }
             if (i == P_PRE_INIT) loadPreset(kInitKey);
             if (i == P_PRE_SAVE) savePreset();
-            if (i == P_MOVE_GO) postMove(MoveCall::kGo, 0);   // the selected Move, again
+            if (i == P_MOVE_GO) {   // the selected Move, again: the call carries it (None selected: no call)
+                const int selected = static_cast<int>(std::lround(want_[P_MOVE].load() * static_cast<float>(PARAM_INFO[P_MOVE].nopts - 1))) - 1;
+                if (selected >= 0) postMove(MoveCall::kGo, selected);
+            }
             if (i == P_CAT_PREV || i == P_CAT_NEXT || i == P_ITEM_PREV || i == P_ITEM_NEXT || i == P_RND) browserAction(i);
             break;
         case Kind::Tile:
@@ -219,11 +221,15 @@ void Surface::apply(int i, float n) {
 
 // --- the Moves ----------------------------------------------------------------------------
 
+// A load ends whatever was waiting to be fired or stopped, and is a flag the audio thread cannot miss; the others replace
+// each other (the latest is the state the Moves are to be in).
 void Surface::postMove(int kind, int move) {
-    uint32_t head = moveHead_.load(std::memory_order_relaxed);
-    if (head - moveTail_.load(std::memory_order_acquire) >= kMoveQueue) --head;   // full: the newest takes the last place
-    moveQ_[head % kMoveQueue].store(static_cast<uint32_t>(kind) << 4 | static_cast<uint32_t>(move & 15), std::memory_order_relaxed);
-    moveHead_.store(head + 1, std::memory_order_release);
+    if (kind == MoveCall::kLoad) {
+        moveCall_.store(0, std::memory_order_relaxed);
+        moveLoad_.store(true, std::memory_order_release);
+        return;
+    }
+    moveCall_.store(static_cast<uint32_t>(kind + 1) << 4 | static_cast<uint32_t>(move & 15), std::memory_order_release);
 }
 
 // A tap on Move `move`'s tile selects the Move and fires it. A tap flips what MPC read back, and the tile reads back lit
@@ -240,16 +246,22 @@ void Surface::tapMoveTile(int param, int move, bool on) {
 }
 
 bool Surface::takeMoveCall(MoveCall& out) {
-    const uint32_t tail = moveTail_.load(std::memory_order_relaxed);   // (the audio thread's own)
-    if (tail == moveHead_.load(std::memory_order_acquire)) return false;
-    const uint32_t word = moveQ_[tail % kMoveQueue].load(std::memory_order_relaxed);
-    moveTail_.store(tail + 1, std::memory_order_release);
-    out.kind = static_cast<int>(word >> 4);
+    if (moveLoad_.exchange(false, std::memory_order_acquire)) {   // first: it ends what came before it
+        out.kind = MoveCall::kLoad;
+        out.move = 0;
+        return true;
+    }
+    const uint32_t word = moveCall_.exchange(0, std::memory_order_acquire);
+    if (word == 0) return false;
+    out.kind = static_cast<int>(word >> 4) - 1;
     out.move = static_cast<int>(word & 15u);
     return true;
 }
 
-void Surface::dropMoveCalls() { moveTail_.store(moveHead_.load(std::memory_order_acquire), std::memory_order_release); }
+void Surface::dropMoveCalls() {
+    moveLoad_.store(false, std::memory_order_relaxed);
+    moveCall_.store(0, std::memory_order_relaxed);
+}
 
 void Surface::moveLit(uint32_t mask) {
     if (mask == litMoves_) return;
