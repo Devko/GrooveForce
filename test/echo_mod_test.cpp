@@ -16,6 +16,8 @@ namespace {
 
 using namespace eft;
 using gf::EchoMod;
+using gf::KeyFollower;
+using gf::TransientDetector;
 using gf::Swing;
 
 constexpr int kChunk = ef::kChunk;
@@ -558,6 +560,86 @@ void modAnyInput() {
     CHECK(count == 2940);
 }
 
+// --- the Echo's way: one detector and one follower for all the lines (R41) ---------------------------
+
+// nextShared() with a detector and a follower of the caller's is what next() makes of its own, bit for bit.
+void modShared() {
+    const int lead = 8820, beats = 16;
+    Buf L, R;
+    kickLoop(L, R, lead, beats);
+    for (float sens : {0.0f, 0.5f, 0.8f, 1.0f}) {
+        for (double rate : {0.25, 1.0, 3.0}) {
+            EchoMod own, shared;
+            TransientDetector det;
+            det.setSensitivity(sens);
+            const EchoMod::Params p = envParams(rate, sens);
+            bool same = true;
+            ef::Transport t = transport(120.0, 0.0);
+            int fires = 0;
+            for (size_t pos = 0; pos < L.size(); pos += kChunk) {
+                const int n = static_cast<int>(std::min(static_cast<size_t>(kChunk), L.size() - pos));
+                const float a = own.next(p, t, &L[pos], &R[pos], n);
+                const int at = det.process(&L[pos], &R[pos], n);
+                const float b = shared.nextShared(p, t, n, at, 0.0f);
+                same = same && a == b;
+                fires += b == 1.0f ? 1 : 0;
+                t.beats += beatsPerChunk(120.0) * n / kChunk;
+            }
+            CHECK(same);
+            if (sens >= 0.5f && rate == 1.0) CHECK(fires >= 14);   // (the hits are really found)
+        }
+    }
+    // The follower: the level on a burst of a sine and the noise before it, in both ways.
+    {
+        Buf x = sine(440.0, 3 * 44100, 0.5f);
+        for (size_t i = 0; i < 22050; ++i) x[i] *= 0.05f;
+        EchoMod own, shared;
+        KeyFollower fol;
+        bool same = true;
+        ef::Transport t = transport(120.0, 0.0);
+        for (size_t pos = 0; pos < x.size(); pos += kChunk) {
+            const int n = static_cast<int>(std::min(static_cast<size_t>(kChunk), x.size() - pos));
+            const float a = own.next(followParams(), t, &x[pos], &x[pos], n);
+            const float b = shared.nextShared(followParams(), t, n, -1, fol.process(&x[pos], &x[pos], n));
+            same = same && a == b;
+        }
+        CHECK(same);
+    }
+    // One detector, two modulators: both found the same hit, each falls at its own rate (-60 dB over 1 and 2 beats).
+    {
+        EchoMod fast, slow;
+        TransientDetector det;
+        Buf a = whiteNoise(44100, 0.0001f, 5), b = a;
+        addKick(a, 3000, 0.8f);
+        addKick(b, 3000, 0.8f);
+        ef::Transport t = transport(120.0, 0.0);
+        std::vector<float> vf, vs;
+        for (size_t pos = 0; pos + kChunk <= a.size(); pos += kChunk) {
+            const int at = det.process(&a[pos], &b[pos], kChunk);
+            vf.push_back(fast.nextShared(envParams(1.0), t, kChunk, at, 0.0f));
+            vs.push_back(slow.nextShared(envParams(2.0), t, kChunk, at, 0.0f));
+        }
+        size_t hit = 0;
+        while (hit < vf.size() && vf[hit] != 1.0f) ++hit;
+        CHECK(hit < vf.size() && vs[hit] == 1.0f);
+        const size_t later = hit + 345;   // 0.25 s on, half a beat: -30 dB for the fast one, -15 for the slow
+        CHECK(std::fabs(db(vf[later]) + 30.0) < 1.5 && std::fabs(db(vs[later]) + 15.0) < 1.5);
+    }
+    // What does not make sense is nothing: an onset outside the chunk is none, a level that is not a number is 0.
+    {
+        EchoMod m;
+        ef::Transport t = transport(120.0, 0.0);
+        for (int i = 0; i < 100; ++i) m.nextShared(envParams(1.0), t, kChunk, -1, 0.0f);   // past the 60 ms warm-up
+        for (int bad : {-7, kChunk, kChunk + 5, 1 << 30}) CHECK(m.nextShared(envParams(1.0), t, kChunk, bad, 0.0f) == 0.0f);
+        CHECK(m.nextShared(envParams(1.0), t, kChunk, 5, 0.0f) == 1.0f);   // and a real one is taken
+        EchoMod f;
+        CHECK(f.nextShared(followParams(), t, kChunk, -1, std::nanf("")) == 0.0f);
+        CHECK(f.nextShared(followParams(), t, kChunk, -1, -1.0f) == 0.0f);
+        CHECK(f.nextShared(followParams(), t, kChunk, -1, INFINITY) == 1.0f);
+        CHECK(f.nextShared(followParams(), t, kChunk, -1, 0.25f) == 0.25f * 2.14f);
+    }
+}
+
 } // namespace
 
 void echoModTests() {
@@ -575,6 +657,7 @@ void echoModTests() {
     modFollowTimes();
     modFollowKey();
     modAnyInput();
+    modShared();
 }
 
 // make test-module M=echo_mod builds with -DMODULE_TESTS=<M>Tests, i.e. echo_modTests; the suite
