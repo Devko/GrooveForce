@@ -4,3 +4,4 @@ pump_rate=1/8
 pump_curve=Punch
 pump_depth=0.7
 pump_length=0.7
+output=1.9

@@ -1,0 +1,18 @@
+grooveforce 1
+pump_on=On
+pump_rate=1/4
+pump_curve=Punch
+pump_depth=0.9
+pump_length=0.45
+echo_on=On
+echo_route=Parallel
+a_on=On
+a_level=0.8
+a_div=1/16
+a_fb=0.6
+a_mode=Mono
+a_ftype=LP
+a_cut=500
+a_reso=0.35
+a_drive=0.3
+output=-0.8

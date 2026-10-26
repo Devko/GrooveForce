@@ -1,5 +1,6 @@
 grooveforce 1
 shape_on=On
+shape_target=Dry
 vol_on=On
 vol_shape=Shuffle
 vol_rate=1 bar
@@ -8,3 +9,14 @@ pan_on=On
 pan_shape=Triangle
 pan_rate=1 bar
 pan_depth=0.4
+echo_on=On
+echo_route=Parallel
+a_on=On
+a_level=0.55
+a_pan=0.3
+a_div=1/8T
+a_fb=0.15
+a_ftype=HP
+a_cut=3000
+a_place=On Output
+output=-1.0

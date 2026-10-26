@@ -1,0 +1,15 @@
+grooveforce 1
+swing=0.57
+swing_unit=1/16
+shape_on=On
+vol_on=On
+vol_shape=Rolling 16ths
+vol_rate=1 bar
+vol_depth=0.5
+pan_on=On
+pan_shape=Sine
+pan_rate=2 bars
+pan_depth=0.15
+time_on=On
+time_place=Post
+time_groove=Swing
