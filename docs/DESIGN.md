@@ -66,7 +66,7 @@ design:
 | Latency | Not compensated (`acceptIOChanges`: no). GrooveForce is zero-latency |
 | Pages | MPC skins can't draw changing graphics (no drawn curves). Five tab groups show without a pager. Each page has its own Q-Link set |
 | MIDI into an insert | **Untested.** The host says it can send MIDI. EffectForce tells MPC it takes none. See [Open](#open) |
-| Getters | Polled about 600 times a second with the screen open; every getter must be cheap. 2026-10-26 (plan 1's ruling R22): not lock-free, as first written. Values are atomics; the texts of the stepper, the tiles and the readouts are a cache behind a mutex that only the UI thread takes. The audio thread never takes it |
+| Getters | Polled about 600 times a second with the screen open; every getter must be cheap. 2026-10-26 (plan 1's ruling R22, in the build ledger kept outside the repo): not lock-free, as first written. Values are atomics; the texts of the stepper, the tiles and the readouts are a cache behind a mutex that only the UI thread takes. The audio thread never takes it |
 | Stop | Suspends and resumes within 100 ms. Under 250 ms keeps every buffer (EffectForce's rule) |
 | CPU | 2902 µs per block per instance; a plugin passes at p99 ≤ 15% |
 
@@ -401,10 +401,12 @@ It fails, even if it technically works, if:
    Force (one instance and four), playing each must use case on the device, then 0.0.1 and the
    catalog entry.
 
-Where it stands, 2026-10-26: steps 1 and 2 are done (plan 1) and were played on the Force: the Pump
-and the Shape work ("it works, but the hat are very very basic", the user, which pointed plan 2 at
-the Echo). Plan 2 builds steps 3 and 4 and the factory presets of step 5. Its last task is the one that
-needs the user: the bench on the Force, and playing the nine musts on the device.
+Where it stands, 2026-10-26: step 2 is done (plan 1) and was played on the Force: the Pump and the
+Shape work ("it works, but the hat are very very basic", the user, which pointed plan 2 at the Echo).
+Step 1 is done but for its last part: the probe is built ([PROBE.md](PROBE.md)), and its three device
+questions are still to be answered on the Force. Plan 2 builds steps 3 and 4 and the factory presets of
+step 5. Its last task is the one that needs the user: the bench on the Force, and playing the nine
+musts on the device.
 
 ### Your part
 
@@ -414,8 +416,9 @@ Claude instead, and the user judges them by ear on the Force:
 
 - **The pump's curve** (step 2): the function from where in the step we are to the gain, for a
   curve, depth and length. What makes a duck feel like Kickstart. The user, 2026-10-25: "Design the
-  pump for me for now, I will later check it on the force plugin" (R11 in plan 1's ledger). The ten
-  curves in `dsp/pump_curves.cpp` are Claude's first version.
+  pump for me for now, I will later check it on the force plugin" (plan 1's ruling R11, in the build
+  ledger, which is not in the repo). The ten curves in `dsp/pump_curves.cpp` are Claude's first
+  version.
 - **How swing moves audio** (step 4). When a 16th comes late, the playhead jumps back by the swing
   delay, which repeats the last few ms of the 16th before it. Alternatively it can glide back,
   bending the pitch a little like tape. Jump-and-crossfade is clean on drums. A glide is smoother on
@@ -432,8 +435,9 @@ level-matching, and anything here marked "about".
 ## Plan 2 rulings (2026-10-26)
 
 The user asked to "do all at once, implement all that is open" (2026-10-26). These are Claude's calls,
-made while building the Echo, Time, the Moves and the presets. The numbers are the plan ledger's; plan
-1's carry their own ("plan 1's R22"). Each says what the design text above no longer says.
+made while building the Echo, Time, the Moves and the presets. The R-numbers are the build ledger's
+(plan 2's, and plan 1's where it says so); the ledger is kept outside the repo, so each ruling says
+what was decided. Each says what the design text above no longer says.
 
 **Decided for the plan**
 

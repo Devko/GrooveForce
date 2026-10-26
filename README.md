@@ -29,7 +29,7 @@ a showpiece. Four parts, **Pump**, **Shape**, **Echo** and **Time**, and 16 one-
 Whatever is on, it stays on MPC's song position through loops, locates and tempo changes (stopped, the
 grid runs on at the tempo), adds no latency, never clicks (no gain edge is faster than 1 ms, every
 jump a 5 ms crossfade) and changes nothing until something is turned up: Init passes the input through
-bit for bit. A part that is off costs nothing.
+bit for bit. A part that is off costs no CPU (but for Time's recording, once Time has been used).
 
 Five tabs: GROOVE, PUMP+SHAPE, ECHO, TIME and SETUP, each page with its own Q-Link set. Not in it yet:
 Hold (a Move while its tile is held) and MIDI-triggered Moves and Pump, which wait for the

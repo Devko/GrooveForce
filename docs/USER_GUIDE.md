@@ -48,8 +48,9 @@ segments; a long list (a curve, a shape, a division) is a popup: tap it and pick
 detent on a choice moves it by one option.
 
 Most controls' names say what they belong to ("Pump Depth", "A Feedback"), because MPC's Q-Link
-overlay shows the name without the page. Three are short: **Cutoff** and **Resonance** are the Shape's
-filter lane, **Sensitivity** and **Crossover** the Pump's.
+overlay shows the name without the page. A few are short: **Cutoff** and **Resonance** are the Shape's
+filter lane, **Sensitivity** and **Crossover** the Pump's; **Input**, **Output**, **Mix**, **Swing**
+and **Move** belong to the whole plugin.
 
 | Tab | Pages |
 |---|---|
@@ -62,7 +63,7 @@ filter lane, **Sensitivity** and **Crossover** the Pump's.
 | Page | What's on it | Q-Links |
 |---|---|---|
 | GROOVE | **KNOBS** card: Pump Depth, Shape Depth, Echo Send, Echo FB, Echo Tone, Swing (with its unit, 1/16 or 1/8, under it), Mix, Output. **PARTS** card: PUMP, SHAPE, ECHO and TIME switches, ORDER (Echo First or Echo Last) and TIME PLACE (Post or Pre) | the eight knobs |
-| PRESETS | CATEGORIES and PRESETS tiles, PREV / NEXT, the loaded preset, FAV, RND, SAVE, INIT | the preset stepper, Input, Output, Mix |
+| PRESETS | CATEGORIES and PRESETS tiles, PREV / NEXT, the loaded preset, the Favorite toggle, RND, SAVE, INIT | the preset stepper, Input, Output, Mix |
 | PUMP | **PUMP** card: Depth, Length, Curve, Rate, Push, Band, Crossover, Pump Mix. **TRIGGER AND TARGET** card: Trigger, Sensitivity, Target, ON | the PUMP card, then the second card |
 | SHAPE | a card each for **VOLUME**, **PAN** and **FILTER** (ON, shape, rate, depth, phase; the filter adds type, Cutoff and Resonance) and a **SHAPE** card (ON, Target, Shape Depth, Shape Mix) | across the lanes, not card by card: Volume Depth, Volume Shape, Volume Rate, Filter Depth, Filter Shape, Cutoff, Pan Depth, Pan Shape; then Volume Phase, Filter Rate, Resonance, Filter Type, Pan Rate, Pan Phase, Shape Mix, Shape Target |
 | ECHO | **ECHO** card: Echo Send, Echo FB, Echo Tone, Echo Duck, Echo Width, Echo Level, ROUTING, FREEZE. **LINES** card: each line's switch, division and feedback. **PART** card: ON, ORDER, GLIDE | the ECHO card |
@@ -106,9 +107,12 @@ Stopped, the grid runs on from where MPC stopped, at the tempo, so you can hear 
 set it up. Copies on other tracks lock to the same song position, so a pump on the bass and a shape
 on the pads land on the same beats. **Swing** is one setting for all of it: [see below](#swing).
 
-Every part has a switch. A part that is off costs no CPU, and switching fades over 10 ms. A part
-that comes on starts fresh: no echo of what played minutes ago. The Echo's lines and Time's memory
-(about 4 MB each) are made the first time they are needed, so a copy that only pumps holds none.
+Every part has a switch, and switching fades over 10 ms. A part that is off costs no CPU, with one
+exception: once Time has been used, its memory goes on recording while Time is off (a write per
+sample), so the Moves that play the past always have it. The Pump, the Shape and the Echo come on
+from cleared state, with no echo of what played minutes ago; Time comes on with the memory it has.
+The Echo's lines and Time's memory (about 4 MB each) are made the first time they are needed, so a
+copy that only pumps holds none.
 
 The levels: **Input** (-24 to +24 dB) sets the level into everything. **Output** (-24 to +24 dB)
 sets the level out. **Mix** blends the result with the input as it came in (100% for an insert;
@@ -211,7 +215,7 @@ A gate shows as 16 steps, `x` open and `.` closed:
 
 **A 16-step shape is 16 steps of one cycle.** Set the lane's Rate to **1 bar** and the steps are 16ths.
 At 2 bars they are 8ths, and at the default 1/4 they are 64ths. The accents: Offbeat Accent has the
-offbeat 16th of every beat at full level and the rest at 45%. Rolling 16ths runs 100, 55, 75, 55%
+third 16th of every beat (the offbeat eighth) at full level and the rest at 45%. Rolling 16ths runs 100, 55, 75, 55%
 through each beat. Shuffle runs 100, 30, 70, 50%. Gallop Accent opens the Gallop's steps, the head of
 each group of four at 100% and the others at 60%.
 
@@ -262,8 +266,8 @@ cut to 3 s.
 
 **Filter place.** A filter **In Loop** is part of the loop: each repeat is filtered again, so the
 echoes get darker, thinner or narrower with every pass (rumble, dub). **On Output** shapes only what
-you hear: every repeat comes out through the same filter once, and the loop itself stays open. A
-resonant filter In loop keeps its tone in the repeats, but the loop never gains: the repeats still die
+you hear: every repeat comes out through the same filter once, and the loop carries the unfiltered
+repeat round again. A resonant filter In loop keeps its tone in the repeats, but the loop never gains: the repeats still die
 away, and feedback 100% holds them without growing. What you hear can be louder than what went
 in (up to 12 times at Resonance 100%), as with any resonant filter.
 
@@ -312,12 +316,15 @@ drive in the loop the repeats wear down slowly.
 | **Parallel** | the send | the send | the send | the send |
 | **Serial** | the send | A's output | B's output | C's output |
 | **Pairs** | the send | A's output | the send | C's output |
-| **Ring** | the send and D's output | A's output | B's output | C's output |
+| **Ring** | the send and D's output (see below) | A's output | B's output | C's output |
 | **Spread** | the send | A's output | A's output | A's output |
 
 Every line that is on is heard at its Level and Pan, whatever the routing. A line that is off gives
-the routing nothing: in Serial, Pairs and Spread the lines after it hear nothing, so start a chain
-with a line that is on. A routing change crossfades in about 1 ms.
+the routing nothing. In Serial, Pairs and Spread the line it feeds hears nothing: every line after it
+in Serial, B if A is off and D if C is off in Pairs, and B, C and D if A is off in Spread. So start a
+chain with a line that is on. A **Ring** goes round the lines that are on instead: the send goes to
+the first line that is on (B, if A is off), and each line hears the line that is on before it. A
+routing change crossfades in about 1 ms.
 
 In **Parallel**, **Serial**, **Pairs** and **Spread** every line keeps its own feedback: a line of
 repeats. **Ring** is the one routing that goes round, and there the feedback means something else: a
@@ -358,7 +365,9 @@ is switched off. So **Reverse Beat**, **Rewind**, **Spin-Back** and **Tape Stop*
 have something to play. A copy that has never used Time holds no memory: the first time you switch
 Time on or pick a Move that needs it, it starts recording from then, so pick a Time Move a bar or
 two before the first time you play it. A Move reaches back at most 8 beats. A groove switched on
-from rest passes the input for a few tens of milliseconds until the memory holds its delay.
+right after the memory was made or cleared passes the input until the memory holds the groove's
+longest delay plus a crossfade: about 26 ms for Swing 58% on 1/16 at 120 BPM, about 130 ms for Swing
+75% on 1/8 (longer at slower tempos), up to about 26 ms for Drunk and Push.
 
 **The patterns.** A pattern says where Time reads (now, or behind it) and how loud, over a length on
 the grid. The Moves play them; the library holds 15:
@@ -416,7 +425,7 @@ In order, row by row:
 
 | | Move | Length | What it does |
 |---|---|---|---|
-| 1 | **Throw Beat** | 1 beat | Opens the Echo's send fully and raises the feedback (+30 points) for the Move, then closes again. The echo rings on after |
+| 1 | **Throw Beat** | 1 beat | Opens the Echo's send fully and raises the feedback (+30 points) for the Move; the send then goes back to the Send knob's own value. The echo rings on after |
 | 2 | **Throw Bar** | 1 bar | The same for a bar |
 | 3 | **Dub Freeze** | 5 beats | A beat of send and feedback up, then the Echo is frozen for a bar |
 | 4 | **Half-Time Bar** | 1 bar | The bar at half speed, an octave down, then back to live |
@@ -498,7 +507,7 @@ about as loud as it went in, and you compare sounds, not levels. **Init** is eve
 (The PRESETS page lists the set that is installed; the names above are the factory set's.)
 
 - **PRESETS page:** categories on the left (**FAVORITES** and **RECENT** first), presets on the right;
-  tap to load. **FAV** marks the loaded preset, **RND** loads a random one of the category, **SAVE**
+  tap to load. The **Favorite** toggle marks the loaded preset, **RND** loads a random one of the category, **SAVE**
   writes `User NNN.gfp` (there is no text entry on the device), **INIT** loads Init.
 - **The preset stepper** (GROOVE page, top right) walks all presets, one per Q-Link detent.
 - Preset files live in the plugin's folder under `Presets/` and on the SSD under
@@ -507,7 +516,8 @@ about as loud as it went in, and you compare sounds, not levels. **Init** is eve
 ## Grooves by job
 
 Starting points, not rules. The presets above set up most of them; these say what they are made of,
-so you can change them. Set a part's switch last, so you hear the finished setting come in.
+so you can change them. The steps follow the screens, not a rule: switch a part on first and hear it
+as you set it, or set it up with the part off and switch it on last to hear the finished setting come in.
 
 ### Kick rumble
 
@@ -589,7 +599,8 @@ want it in. **Move Quantize** Bar puts every Move on a downbeat; Beat (the defau
 
 - **Into the break:** **Tape Stop** for the bar before it, then **Break** for the break itself (the
   dry goes and the echo rings: a line must be on).
-- **Out of the break:** **Roll Build 4 Bars**, tapped four bars ahead, speeds up into the downbeat.
+- **Out of the break:** **Roll Build 4 Bars** speeds up into the downbeat at the end of its four
+  bars: tap it in the bar before the four bars you want it in.
   **Reverse Beat** and **Rewind** run for a beat from their line and play the audio from before it
   backwards: with Quantize on Beat, tap them during the beat before the last beat of the phrase, so
   they start on the last beat and the downbeat comes back live.
@@ -621,8 +632,9 @@ the echoes ring on through it.
 - **Resonant filters in the loop.** The repeats keep the filter's resonant tone, but the loop never
   gains: feedback 100% holds the repeats and never makes them grow. What you hear can still be louder
   than what went in. The output is held to +18 dBFS.
-- **The Ring's feedback means "round the ring".** See [Echo](#echo). With a line off, Serial, Pairs and
-  Spread pass nothing on from it.
+- **The Ring's feedback means "round the ring".** See [Echo](#echo). With a line off, the line it
+  feeds in Serial, Pairs and Spread hears nothing; a Ring goes round the lines that are on, and
+  hands the send to the first of them.
 - **Time never plays the future.** A trick that seems to need it plays what was recorded.
 - **Moves are the factory 16.** You can pick and save the selected Move, the mode and the quantize in a
   preset, but not edit a Move or re-order the tiles. There is no Hold mode (a Move while the tile is
@@ -647,7 +659,7 @@ the echoes ring on through it.
 - **Projects** save every sound setting, the selected Move and the preset it came from. The Move that
   plays is not saved. Loading fires nothing.
 - **Many copies.** Put one on each track you like. Each is independent and locks to the same song
-  position; a part that is off costs nothing, and the Echo's and Time's memory is only taken where they
-  are used.
+  position; a part that is off costs no CPU (but for Time's recording, once Time has been used), and the
+  Echo's and Time's memory is only taken where they are used.
 - **MIDI.** GrooveForce tells MPC it takes none. Moves are played from the screen, the Q-Links and
   automation.
