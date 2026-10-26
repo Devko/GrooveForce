@@ -1,5 +1,6 @@
 // Pump: see pump.h.
 #include "pump.h"
+#include "slew.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,8 +19,6 @@ double clampD(double x, double lo, double hi, double nan) { return x >= lo ? (x 
 
 // A level held to 0..1; not a number is 1 (a curve that gives up leaves the input alone).
 float unit(float x) { return x >= 0.0f ? (x <= 1.0f ? x : 1.0f) : (x < 0.0f ? 0.0f : 1.0f); }
-
-float toward(float v, float target, float step) { return v < target ? std::min(v + step, target) : std::max(v - step, target); }
 
 } // namespace
 
@@ -59,10 +58,13 @@ void Pump::set(const Params& p, const ef::Transport& t) {
     det_.setSensitivity(ef::clampParam(p.sensitivity, 0.0f, 1.0f, 0.5f));
     swing_ = p.swing;
 
-    // Where the chunk starts: MPC's song position while it plays, else where the last chunk ended.
+    // Where the chunk starts: MPC's song position while it plays, else where the last chunk ended. The
+    // first chunk after reset() starts from MPC's position whether it plays or not: stopped, the grid
+    // runs on from there at the tempo.
     const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
     bps_ = bpm / 60.0 / ef::kRate;
-    b0_ = t.playing && t.valid && std::isfinite(t.beats) ? t.beats : pos_;
+    const bool known = t.valid && std::isfinite(t.beats);
+    b0_ = known && (t.playing || fresh_) ? t.beats : pos_;
 
     if (trigger != trigger_) {   // Input picked: its low-pass starts clean and the detector warms up on the audio (never reset)
         trigger_ = trigger;
@@ -165,10 +167,13 @@ void Pump::advance(int n) {
     numPending_ -= gone;
 }
 
-void Pump::process(float* L, float* R, int n) {
+void Pump::process(float* L, float* R, int n, const float* keyL, const float* keyR) {
     n = std::min(n, ef::kChunk);
     if (n <= 0) return;
-    if (trigger_ == kInput) listen(L, R, n);
+    if (trigger_ == kInput) {
+        const bool keyed = keyL && keyR;
+        listen(keyed ? keyL : L, keyed ? keyR : R, n);   // (before the audio is touched: the key may be the audio)
+    }
 
     const float a0 = amount_;
     glideAmount(n);

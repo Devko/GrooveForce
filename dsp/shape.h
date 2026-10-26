@@ -17,6 +17,8 @@
 // plus its phase: cycles = toStraight(beats) / rateBeats + phase. While MPC plays (and says where)
 // that is MPC's beat; so a loop, a locate or a tempo change leaves the lane on the grid. Stopped, the
 // cycle runs on at the tempo from where it was, and starting to play moves it to the song position.
+// The first set() after reset() takes the song position whether MPC plays or not (when it says where),
+// so a lane reset while stopped at beat 9.5 starts at beat 9.5 and not at 0.
 // The random shapes are seeded by the whole cycle, so a one-bar loop plays the same bar every time.
 //
 // Per chunk (set() is called once per chunk, 32 samples) each running lane evaluates its shape at the

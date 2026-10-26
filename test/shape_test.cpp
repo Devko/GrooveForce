@@ -466,15 +466,15 @@ void shapeStopped() {
         }
         return ok;
     };
-    // Nobody tells it the position (MPC reports beats 77.7 while stopped): it starts at 0 and runs at the tempo.
+    // MPC reports beat 80 (the start of a bar) while stopped: it starts there, and runs at the tempo.
     Buf L(3 * 44100, 1.0f), R = L;
-    render(p, L, R, transport(120.0, 77.7, false));
+    render(p, L, R, transport(120.0, 80.0, false));
     CHECK(stepsOk(L, k16th, 0));
     Buf L2(3 * 44100, 1.0f), R2 = L2;
-    render(p, L2, R2, transport(90.0, 77.7, false));   // slower: a 16th is 7350 samples
+    render(p, L2, R2, transport(90.0, 80.0, false));   // slower: a 16th is 7350 samples
     CHECK(stepsOk(L2, 7350.0, 0));
     CHECK(!same(L, L2));
-    // Playing but without a valid position runs on too.
+    // Playing but without a valid position runs on too (from 0, the same place in the bar).
     Transport lost = transport(120.0, 77.7, true);
     lost.valid = false;
     Buf L3(3 * 44100, 1.0f), R3 = L3;
@@ -504,6 +504,61 @@ void shapeStopped() {
     const Followed f = follows(L4, steps, idx("Offbeat"), 4.0);
     CHECK(f.wrong == 0 && f.checked > 300);
     if (f.wrong || f.checked <= 300) std::printf("  stopped and started: %d of %d chunks off the cycle, worst by %g\n", f.wrong, f.checked, f.worst);
+}
+
+// Reset while MPC is stopped, and says where: the lane starts from that song position (as it does when
+// playing) and then runs on at the tempo (plan 1's ruling R21; it used to start from beat 0). Only the first
+// set() after reset() seeds it, and only when MPC's position is valid.
+void shapeSeededStopped() {
+    const P p = with(Shape::kVolume, "Offbeat", 4.0, 1.0f);   // 16 steps a bar, every fourth one open from the third
+    // The gain a step at a time: `step` samples each, the first being step `first` of the bar.
+    auto stepsOk = [](const Buf& out, double step, int first) {
+        bool ok = true;
+        for (int k = 0; (k + 1) * step < static_cast<double>(out.size()); ++k) {
+            const float want = (first + k) % 4 == 2 ? 1.0f : 0.0f;
+            for (size_t i = static_cast<size_t>(k * step) + 100; i < static_cast<size_t>((k + 1) * step) - 100; ++i)
+                if (std::fabs(out[i] - want) > 1e-6f) ok = false;
+        }
+        return ok;
+    };
+    // Stopped at beat 9.5 (step 6 of its bar): the first 16th is open. From 0 it would be shut.
+    Buf L(3 * 44100, 1.0f), R = L;
+    render(p, L, R, transport(120.0, 9.5, false));
+    CHECK(stepsOk(L, k16th, 6));
+    // Slower, and from a step that is not the first of its beat: 5.25 beats is step 21 (90 BPM: 7350 samples a 16th).
+    Buf L2(3 * 44100, 1.0f), R2 = L2;
+    render(p, L2, R2, transport(90.0, 5.25, false));
+    CHECK(stepsOk(L2, 7350.0, 21));
+    CHECK(!stepsOk(L2, 7350.0, 0));
+    // MPC keeps saying 9.5, or says something else later: the position is a seed, not a source. It runs on at the tempo.
+    Buf L3(3 * 44100, 1.0f), R3 = L3;
+    {
+        Shape m;
+        for (size_t pos = 0; pos < L3.size(); pos += kChunk) {
+            m.set(p, transport(120.0, pos < 44100 ? 9.5 : 77.7, false));
+            m.process(&L3[pos], &R3[pos], static_cast<int>(std::min<size_t>(kChunk, L3.size() - pos)));
+        }
+    }
+    CHECK(same(L, L3));
+    // MPC doesn't say where (not valid): from the top, as before.
+    Transport lost = transport(120.0, 9.5, false);
+    lost.valid = false;
+    Buf L4(3 * 44100, 1.0f), R4 = L4;
+    render(p, L4, R4, lost);
+    CHECK(stepsOk(L4, k16th, 0));
+    // Not a number is not a position either.
+    Transport nan = transport(120.0, std::nan(""), false);
+    Buf L5(3 * 44100, 1.0f), R5 = L5;
+    render(p, L5, R5, nan);
+    CHECK(same(L4, L5));
+    // A used Shape, reset, and stopped at 9.5 again: the same as a new one.
+    Shape used;
+    Buf warm(44100, 1.0f), warmR = warm;
+    run(used, p, warm, warmR, transport(120.0, 1.0, true));
+    used.reset();
+    Buf L6(3 * 44100, 1.0f), R6 = L6;
+    run(used, p, L6, R6, transport(120.0, 9.5, false));
+    CHECK(same(L, L6));
 }
 
 // Locates (forwards and back), a stop and a start elsewhere, and short loops: the gain is on the
@@ -847,6 +902,7 @@ void shapeTests() {
     shapePhase();
     shapeEdges();
     shapeStopped();
+    shapeSeededStopped();
     shapeFollowsJumps();
     shapeTempoChange();
     shapeExtremes();

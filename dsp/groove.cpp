@@ -1,5 +1,6 @@
 // Groove: see groove.h.
 #include "groove.h"
+#include "slew.h"
 
 #include <algorithm>
 #include <cstring>
@@ -18,8 +19,6 @@ float gainOf(float db) {
     db = ef::clampParam(db, -kMaxDb, kMaxDb, 0.0f);
     return db == 0.0f ? 1.0f : ef::dbToGain(db);
 }
-
-float toward(float v, float target, float step) { return v < target ? std::min(v + step, target) : std::max(v - step, target); }
 
 // The bus a target works on: 0 the dry, 1 the wet. All is the sum of the two, which is the dry while
 // the wet is silent: the same bus, so moving a part between All and Dry is no change at all.
