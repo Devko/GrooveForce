@@ -14,6 +14,7 @@ Writes, next to this file:
                      `make test` and the .so build need only Python, not the skin toolchain)
   build/factory_presets.h  the factory presets (presets/Factory/*/*.gfp), checked and embedded
   build/shape_data.h  the shape library (SHAPES), checked: the data dsp/shapes.cpp evaluates
+  build/time_data.h  the Time patterns (TIME_PATTERNS), checked: the data dsp/time.cpp plays
   build/skin_style.json  the palette, knob looks, primary buttons and page groups for
                      skin_polish.py, which `make skin` runs after the generator
 
@@ -1197,6 +1198,246 @@ static_assert(sizeof kShapes / sizeof kShapes[0] == kNumShapes, "a row per shape
 """ % ("\n".join(lines), ",\n".join(rows), len(shapes))
 
 
+# --- the Time patterns: docs/DESIGN.md "Time" -----------------------------------------------------------
+# Flex Beat's and Gross Beat's patterns for Time's playhead, held as data here and checked here; build/time_data.h
+# is what dsp/time.cpp plays. A pattern has a length in beats and two curves over x, in beats from its start:
+#   src  the source s(x): where the playhead reads, in beats from the same start. s(x) = x is now; less is behind
+#        it (a lag of x - s(x) beats); a negative s is audio from before the pattern began. Time has no latency,
+#        so s(x) <= x always: the playhead never reads what has not been played.
+#   vol  the volume, 0..1.
+# A curve is points (x, y, seg), x ascending from 0 to the pattern's length. A point's seg is the way to the next one:
+#   line    a constant speed
+#   smooth  a raised cosine, flat at both ends: the speed rises from 0 and falls back to 0
+#   jump    vertical: the next point has the same x, and the curve jumps there. A source jump is crossfaded over 5 ms
+#           that END at its x (a hit on the line is never heard early); a volume jump is an edge of 1 ms that ends there.
+# The last point's seg is unused (line). A pattern is loopable (it goes round while it is asked for, and starts and ends on
+# the live signal) or a one-shot: past its end the playhead is back at now with the volume at 1, so a one-shot ends at
+# s = x (a last jump to now) or with the volume at 0 (the return hides in the silence).
+# The Moves name the patterns; the engine counts them in this order, which the tests pin: append, don't reorder.
+TIME_PATTERN_COUNT = 15
+TIME_NAME_MAX = 18             # as a preset's
+TIME_SEGS = ("line", "smooth", "jump")
+TIME_MAX_LENGTH = 16.0         # beats
+TIME_MAX_LAG = 8.0             # beats a pattern reaches back: the ring holds 2 bars at 80 BPM, 8 beats
+TIME_MIN_GAP = 0.125           # beats between source jumps, and from the start and to the end: their 5 ms crossfades
+                               # (0.083 beats at the engine's fastest tempo, 999 BPM) must not overlap
+BAR = 4.0
+
+
+def _live(length):
+    return [(0.0, 0.0, "line"), (float(length), float(length), "line")]
+
+
+def _flat(length, level=1.0):
+    return [(0.0, float(level), "line"), (float(length), float(level), "line")]
+
+
+def _rejoin(points):
+    """The source ends in a jump to now: s = x at the end."""
+    x = points[-1][0]
+    return points[:-1] + [(x, points[-1][1], "jump"), (x, x, "line")]
+
+
+def _repeats(phases, rejoin):
+    """The source of a stutter or a roll. A phase (start, end, slice) plays the first slice of the phase live, then
+    repeats it until `end`: each repeat jumps back to the phase's start. A phase begins on the live signal, so the one
+    before it ends in a jump to now. A one-shot (rejoin) ends in one as well."""
+    pts = []
+    for n, (start, end, d) in enumerate(phases):
+        count = round((end - start) / d)
+        assert count >= 1 and start + count * d == end, "a phase is a whole number of slices"
+        pts.append((start, start, "line"))
+        for k in range(1, count):
+            at = start + k * d
+            pts += [(at, start + d, "jump"), (at, start, "line")]
+        last = n == len(phases) - 1
+        pts.append((end, start + d, "line" if last and not rejoin else "jump"))
+    if rejoin:
+        pts.append((phases[-1][1], phases[-1][1], "line"))
+    return pts
+
+
+def _reverse_repeats(length, d):
+    """The source of a reverse stutter: the first slice (d beats) live, then it plays backwards over and over: each repeat
+    jumps back to the slice's end and runs down to its start at speed -1."""
+    count = round(length / d)
+    assert count >= 2 and count * d == length, "a whole number of slices"
+    pts = [(0.0, 0.0, "line"), (d, d, "line")]
+    for k in range(2, count + 1):
+        pts += [(k * d, 0.0, "jump" if k < count else "line")] + ([(k * d, d, "line")] if k < count else [])
+    return pts
+
+
+def _speed_ramp(length, v0, v1, steps):
+    """The source of a playhead whose speed runs from v0 to v1 over `length` beats: s(x) = v0 x + (v1 - v0) x^2 / 2 length,
+    as `steps` lines (the speed steps by (v1 - v0) / steps, and with it the pitch and, near the end, the level: a tape stop of 256
+    steps falls 0.4% at a time)."""
+    return [(length * k / steps, v0 * (length * k / steps) + (v1 - v0) * (length * k / steps) ** 2 / (2.0 * length), "line")
+            for k in range(steps + 1)]
+
+
+def _gate_vol(length, step, opened):
+    """A gate: of each `step` beats the first `opened` (a fraction) at volume 1, the rest at 0, the edges jumps."""
+    pts = []
+    count = round(length / step)
+    for k in range(count):
+        a = k * step
+        b = a + step * opened
+        pts += [(a, 1.0, "line"), (b, 1.0, "jump"), (b, 0.0, "line"), (a + step, 0.0, "jump" if k + 1 < count else "line")]
+    return pts
+
+
+def _pattern(name, length, loopable, src, vol):
+    return dict(name=name, length=float(length), loopable=loopable,
+                src=[(float(x), float(y), seg) for x, y, seg in src], vol=[(float(x), float(y), seg) for x, y, seg in vol])
+
+
+TIME_PATTERNS = [
+    # stutters: the bar's first slice, over and over (the bar's own beginning is live)
+    _pattern("Stutter 1/8", BAR, True, _repeats([(0.0, BAR, 0.5)], False), _flat(BAR)),
+    _pattern("Stutter 1/16", BAR, True, _repeats([(0.0, BAR, 0.25)], False), _flat(BAR)),
+    _pattern("Stutter 1/32", BAR, True, _repeats([(0.0, BAR, 0.125)], False), _flat(BAR)),
+    _pattern("Reverse Stutter", BAR, True, _reverse_repeats(BAR, 0.5), _flat(BAR)),   # jumps into a segment that runs backwards
+    # rolls: each phase repeats its own first slice, the slices shortening; back to now at the end
+    _pattern("Roll Build 1 Bar", BAR, False,
+             _repeats([(0.0, 2.0, 1.0), (2.0, 3.0, 0.5), (3.0, 3.5, 0.25), (3.5, 4.0, 0.125)], True), _flat(BAR)),
+    _pattern("Roll Build 4 Bars", 4 * BAR, False,
+             _repeats([(0.0, 4.0, 1.0), (4.0, 8.0, 0.5), (8.0, 12.0, 0.25), (12.0, 16.0, 0.125)], True), _flat(4 * BAR)),
+    # speed
+    _pattern("Half-Time Bar", BAR, False, _rejoin([(0.0, 0.0, "line"), (BAR, BAR / 2, "line")]), _flat(BAR)),
+    _pattern("Tape Stop", BAR, False, _speed_ramp(BAR, 1.0, 0.0, 256),
+             [(0.0, 1.0, "line"), (BAR - 0.5, 1.0, "line"), (BAR, 0.0, "line")]),   # silent at the end: the speed has fallen to 0
+    _pattern("Slow Down", BAR, False, _rejoin(_speed_ramp(BAR, 1.0, 0.5, 64)), _flat(BAR)),
+    # backwards
+    _pattern("Reverse Beat", 1.0, False, _rejoin([(0.0, 0.0, "line"), (1.0, -1.0, "line")]), _flat(1.0)),
+    _pattern("Spin-Back", 0.5, False, [(0.0, 0.0, "smooth"), (0.5, -1.0, "line")],
+             [(0.0, 1.0, "line"), (0.1, 1.0, "line"), (0.5, 0.0, "line")]),
+    _pattern("Rewind", 1.0, False, _rejoin([(0.0, 0.0, "line"), (1.0, -2.0, "line")]), _flat(1.0)),
+    # gates and the break: the playhead stays at now, the volume moves
+    _pattern("Gate 1/16", BAR, True, _live(BAR), _gate_vol(BAR, 0.25, 0.6)),
+    _pattern("Gate 1/8", BAR, True, _live(BAR), _gate_vol(BAR, 0.5, 0.6)),
+    _pattern("Break Silence", BAR, False, _live(BAR), _flat(BAR, 0.0)),
+]
+
+
+def _curve_at(points, x):
+    """A curve's value at x, as dsp/time.cpp reads it: right-continuous at a jump."""
+    i = 0
+    while i + 2 < len(points) and x >= points[i + 1][0]:
+        i += 1
+    (x0, y0, seg), (x1, y1, _) = points[i], points[i + 1]
+    if x >= x1:
+        return y1
+    if x <= x0:
+        return y0
+    u = (x - x0) / (x1 - x0)
+    return y0 + (y1 - y0) * (0.5 * (1.0 - math.cos(math.pi * u)) if seg == "smooth" else u)
+
+
+def check_time_patterns(patterns):
+    """A wrong entry fails the build, not the device. TIME_PATTERN_COUNT patterns; names unique and short. Each curve:
+    points from x = 0 to the length, x ascending, equal x exactly across a jump (none at the start, no two in a row), a
+    known seg, the last seg a line. The source never ahead of now (s(x) <= x, on both sides of every jump and along every
+    smooth segment) and reaching back at most TIME_MAX_LAG beats; its jumps TIME_MIN_GAP apart. The volume within 0..1.
+    A one-shot ends at s = x or with the volume at 0."""
+    errors, seen = [], set()
+    if len(patterns) != TIME_PATTERN_COUNT:
+        errors.append("%d patterns, the library is %d" % (len(patterns), TIME_PATTERN_COUNT))
+    for pt in patterns:
+        name = pt.get("name", "")
+        where = "%r" % name
+        before = len(errors)
+        if not name or len(name) > TIME_NAME_MAX:
+            errors.append("%s: a name of 1..%d characters" % (where, TIME_NAME_MAX))
+        if name.lower() in seen:
+            errors.append("%s: the name is taken" % where)
+        seen.add(name.lower())
+        length = pt["length"]
+        if not 0 < length <= TIME_MAX_LENGTH:
+            errors.append("%s: the length %s is outside (0, %g] beats" % (where, length, TIME_MAX_LENGTH))
+        for key, label in (("src", "source"), ("vol", "volume")):
+            pts = pt[key]
+            if len(pts) < 2 or pts[0][0] != 0 or pts[-1][0] != length:
+                errors.append("%s: the %s curve runs from x = 0 to the length (%s)" % (where, label, length))
+                continue
+            if pts[-1][2] != "line":
+                errors.append("%s: the %s curve's last point's seg is unused: line" % (where, label))
+            for i, (x, y, seg) in enumerate(pts):
+                if seg not in TIME_SEGS:
+                    errors.append("%s: %s point %d: seg %r is none of %s" % (where, label, i, seg, ", ".join(TIME_SEGS)))
+                if i and x < pts[i - 1][0]:
+                    errors.append("%s: %s point %d: x = %s does not ascend" % (where, label, i, x))
+                if i + 1 < len(pts):
+                    vertical = pts[i + 1][0] == x
+                    if vertical != (seg == "jump"):
+                        errors.append("%s: %s point %d at x = %s: %s" % (where, label, i, x, (
+                            "a jump needs the next point at the same x" if seg == "jump"
+                            else "the next point is at the same x but the seg is not jump")))
+                    if seg == "jump" and (x <= 0 or (i + 2 < len(pts) and pts[i + 2][0] == x)):
+                        errors.append("%s: %s point %d: a jump at the start, or two in a row" % (where, label, i))
+                if key == "vol" and not 0 <= y <= 1:
+                    errors.append("%s: volume point %d: y = %s is outside 0..1" % (where, i, y))
+        if len(errors) > before:
+            continue   # the shape of the curves is wrong: the laws below would only repeat it
+        src = pt["src"]
+        places = [(x, y) for x, y, _ in src]
+        for i in range(len(src) - 1):   # along a smooth segment s - x is not a line: look inside it
+            if src[i][2] == "smooth":
+                for k in range(65):
+                    x = src[i][0] + (src[i + 1][0] - src[i][0]) * k / 64.0
+                    places.append((x, _curve_at(src, x)))
+        for x, y in places:
+            if y > x + 1e-9:
+                errors.append("%s: the source is ahead of now at x = %g (s = %g): Time has no latency" % (where, x, y))
+                break
+        reach = max(x - y for x, y in places)
+        if reach > TIME_MAX_LAG:
+            errors.append("%s: the source reaches back %g beats, the ring holds %g" % (where, reach, TIME_MAX_LAG))
+        jumps = sorted(src[i][0] for i in range(len(src) - 1) if src[i][2] == "jump")
+        edges = [0.0] + [x for x in jumps if x < length] + [length]
+        if any(b - a < TIME_MIN_GAP for a, b in zip(edges, edges[1:])):
+            errors.append("%s: jumps (and the ends) under %g beats apart: their 5 ms crossfades would overlap" % (where, TIME_MIN_GAP))
+        if not pt["loopable"] and not (abs(src[-1][1] - length) < 1e-9 or pt["vol"][-1][1] == 0):
+            errors.append("%s: a one-shot ends at s = x (rejoining now) or with the volume at 0" % where)
+    if errors:
+        raise SystemExit("time patterns:\n  " + "\n  ".join(errors))
+
+
+def time_data_header(patterns):
+    """build/time_data.h: every pattern's source and volume points in one array, and a row per pattern saying where they are."""
+    lines, rows, total = [], [], 0
+    for pt in patterns:
+        first = {}
+        for key, label in (("src", "source"), ("vol", "volume")):
+            first[key] = total
+            lines.append("    // %s, %s" % (pt["name"], label))
+            lines += ["    {%sf, %sf, TSeg::%s}," % (repr(float(x)), repr(float(y)), seg.capitalize()) for x, y, seg in pt[key]]
+            total += len(pt[key])
+        rows.append("    {%s, %sf, %s, %d, %d, %d, %d}" % (
+            c_str(pt["name"]), repr(float(pt["length"])), "true" if pt["loopable"] else "false",
+            first["src"], len(pt["src"]), first["vol"], len(pt["vol"])))
+    return """// generated by surface/surface.py from TIME_PATTERNS: do not edit
+#pragma once
+#include "../../dsp/time.h"
+
+namespace gf {
+
+// Every pattern's source curve, then its volume curve, in pattern order.
+inline constexpr TPoint kTimePoints[] = {
+%s
+};
+
+// name, length in beats, loopable, the source points (first, count), the volume points (first, count).
+inline constexpr TimePatternDef kTimePatterns[] = {
+%s
+};
+inline constexpr int kNumTimePatterns = %d;
+static_assert(sizeof kTimePatterns / sizeof kTimePatterns[0] == kNumTimePatterns, "a row per pattern");
+
+} // namespace gf
+""" % ("\n".join(lines), ",\n".join(rows), len(patterns))
+
+
 def check_lock(keys):
     """params.lock: the parameter keys in index order, one per line, the file sd88me's gen_vst.py writes since
     2026-10-21 (their #488), so a later copy of it reads ours as its own. MPC projects, automation lanes and Q-Link
@@ -1230,6 +1471,7 @@ def main():
     check_layout(layout, build_layout().groups)
     presets = factory_presets()   # everything checked before anything is written
     check_shapes(SHAPES)
+    check_time_patterns(TIME_PATTERNS)
     outputs = [
         ("params.json", json.dumps(params_json(), indent=1)),
         ("layout.conf", layout),
@@ -1237,6 +1479,7 @@ def main():
         (os.path.join("build", "skin_style.json"), json.dumps(skin_style(), indent=1)),
         (os.path.join("build", "factory_presets.h"), presets_header(presets)),
         (os.path.join("build", "shape_data.h"), shape_data_header(SHAPES)),
+        (os.path.join("build", "time_data.h"), time_data_header(TIME_PATTERNS)),
         (os.path.join("build", "param_ids.h"), header()),   # last: make's target, newer than the rest
     ]
     if lock:
@@ -1247,7 +1490,8 @@ def main():
         with open(path + ".tmp", "w", newline="\n", encoding="utf-8") as f:
             f.write(text)
         os.replace(path + ".tmp", path)
-    print("surface: %d parameters, layout ok, %d factory presets, %d shapes" % (len(P), len(presets), len(SHAPES)))
+    print("surface: %d parameters, layout ok, %d factory presets, %d shapes, %d time patterns"
+          % (len(P), len(presets), len(SHAPES), len(TIME_PATTERNS)))
 
 
 if __name__ == "__main__":

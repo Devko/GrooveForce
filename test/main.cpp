@@ -13,6 +13,7 @@ void pumpCurvesTests();
 void shapesTests();
 void transientTests();
 void crossoverTests();
+void timeTests();
 void pumpTests();
 void shapeTests();
 void grooveTests();
@@ -25,6 +26,7 @@ int main() {
     shapesTests();
     transientTests();
     crossoverTests();
+    timeTests();
     pumpTests();
     shapeTests();
     grooveTests();
