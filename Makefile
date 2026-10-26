@@ -142,7 +142,7 @@ $(BUILD)/gfbench: tools/bench.cpp $(HDR) $(GEN) | $(BUILD)
 	$(CXX) -std=c++17 -O2 -Wall -Wextra $(INC) $< -ldl -o $@
 
 # Level-matching (tools/levels.cpp): every factory preset's Output set so the reference mix of its category (the
-# kick for Kick, the bass line and the kick for Bass, ...: tools/reference_mix.h) comes out as loud as it went in.
+# kick for Kick, the bass line alone for Bass, ...: tools/reference_mix.h) comes out as loud as it went in.
 # `levels` reports, `preset-levels` writes the presets' output= lines and regenerates.
 $(BUILD)/gflevels: tools/levels.cpp tools/reference_mix.h plugin/vst2.h | $(BUILD)
 	$(CXX) -std=c++17 -O2 -Wall -Wextra $< -ldl -o $@

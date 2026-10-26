@@ -5,7 +5,8 @@
 //
 // The material: four bars at 120 BPM of chords (detuned saws), a bass line (square), kick, snare and
 // hats, 8 s. Each category plays what it is made for (a kick preset isn't judged on the chords, a chord
-// gate not on the hats): Kick the kick alone, Bass the bass line and the kick, Hats + Perc the hats and
+// gate not on the hats): Kick the kick alone, Bass the bass line alone (a bass track carries no kick, and a
+// Pump that ducks the reference kick would inflate the Output it is matched with), Hats + Perc the hats and
 // the snare, Chords the chords, Drum Bus the kick, snare and hats, the rest (Perform, Echo, Utility) all of it.
 // Whatever the parts, the reference plays at kRefLufs with its peaks under -1 dBFS: the level a track
 // reaches an insert at, so a Pump or a Shape works on it as it would on one. (Where the snare's peaks come
@@ -66,7 +67,7 @@ enum Part : int { CHORDS = 1, BASS = 2, KICK = 4, SNARE = 8, HATS = 16, DRUMS = 
 // is "Hats + Perc"). A category this doesn't know gets the whole mix, as Perform, Echo and Utility do.
 inline int partsFor(const std::string& category) {
     if (category == "Kick") return KICK;
-    if (category == "Bass") return BASS | KICK;
+    if (category == "Bass") return BASS;
     if (category == "Hats + Perc") return HATS | SNARE;
     if (category == "Chords") return CHORDS;
     if (category == "Drum Bus") return DRUMS;

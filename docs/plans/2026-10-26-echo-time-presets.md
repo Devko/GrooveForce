@@ -305,7 +305,7 @@ The reference material by category is the same four bars at 120 BPM throughout, 
 | Category | Reference material |
 |---|---|
 | Kick | The kick alone |
-| Bass | The bass line and kick |
+| Bass | The bass line alone |
 | Hats + Perc | The hats and snare |
 | Chords | The chords |
 | Drum Bus | Kick, snare and hats |

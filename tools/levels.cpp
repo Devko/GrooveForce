@@ -2,7 +2,7 @@
 // plays the reference mix (tools/reference_mix.h: four bars at 120 BPM at -18 LUFS, MPC playing so the Pump and the
 // Shape run on the grid) through every preset in presets/Factory and compares the loudness out with the loudness in
 // (BS.1770 K-weighting, the whole mix, both sides). Each category is judged on the material it is made for (the kick
-// alone, the bass line and the kick, the hats and the snare, the chords, the drums, the full mix: partsFor), the
+// alone, the bass line alone, the hats and the snare, the chords, the drums, the full mix: partsFor), the
 // category being its folder's name without the number. A preset is level-matched when its Output makes the two
 // equal: an insert that changes the groove, not the level. `make preset-levels` writes each preset's output= line;
 // `make levels` reports.
