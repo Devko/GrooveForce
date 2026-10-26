@@ -3,31 +3,51 @@
 // Same verdict rule as sd88me's tools/bench.sh (percent of the 2902 us block): PASS p99 <= 15% and
 // max <= 50%, WARN p99 <= 35% and max <= 80%, else FAIL.
 //
-//   gfbench <plugin.so> [-s seconds] [-c cpu]
+//   gfbench <plugin.so> [-s seconds] [-c cpu] [-m]
+//
+// -m (make bench-count): no timing; marks where each measured processReplacing call starts and ends
+// for tools/gfcount.c, a qemu plugin that counts the ARM instructions in between, and hashes every
+// case's output (FNV-1a over the samples' bits): a change meant to keep the sound bit for bit keeps
+// every hash. GF_CASES=5,6 runs only those cases (numbered from 0, in the order below).
 //
 // Cases (MPC playing at 128 BPM, parameters set through the plugin's own entry points, so the bench
-// needs nothing of the plugin but the .so): everything off (Init: the plugin's own work); the Pump
-// at its heaviest (1/16, Lows, Input trigger, depth 1, push -10 ms); the Shape at its heaviest (three
-// lanes on 1/16, a band-pass at full resonance, Random Smooth on the filter); both together with
-// swing at 75%; and four instances of that, one after another per block, to see whether copies add up
-// as expected: that line is the sum of the four calls of each block, its verdict the per-instance
-// share (a quarter). What a case leaves unsaid stays at its default; depths are set to 1 and the
-// filter's cutoff to 1 kHz, so no lane is silent or wide open. Hermetic: the plugin reads no user
-// folders, saves nothing, and draws the same random numbers every run.
+// needs nothing of the plugin but the .so; tools/cases.h has the settings, shared with the profile-guided
+// build's trainer): everything off (Init: the plugin's own work); the Pump at its heaviest (1/16, Lows, Input
+// trigger, depth 1, push -10 ms); the Shape at its heaviest (three lanes on 1/16, a band-pass at full
+// resonance, Random Smooth on the filter); both together with swing at 75%; four instances of that, one
+// after another per block, to see whether copies add up as expected (that line is the sum of the four
+// calls of each block, its verdict the per-instance share, a quarter). Then plan 2's: the Echo at its
+// heaviest (four lines in a Ring, In loop band-pass at full resonance, drive, wow and an LFO on each), and
+// that with the Fade glide and Ping-Pong lines, which is heavier; Time playing a Move's pattern (Roll Build
+// 1 Bar, going round); Time in its crossfades (Stutter 1/16, which jumps every 1/16); and everything at its
+// heaviest at once (the Echo with the Fade glide). What a case leaves unsaid stays at its
+// default; depths are set to 1 and the filters' cutoffs to 1 kHz, so no lane is silent or wide open.
+//
+// Each case checks itself, so a bench cannot measure something other than what it says: every setting is
+// read back (cases.h), and after the warm-up and again at the end the plugin's status line must say that
+// as many parts ran as the case has on, and the Move's tile must be lit while its Move plays. Hermetic:
+// the plugin reads no user folders, saves nothing, and draws the same random numbers every run. The input
+// is noise around -12 dBFS with a kick-like burst (+9 dB for 20 ms) on every beat, for an Input trigger
+// to fire on.
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 #include "../plugin/vst2.h"
+#include "cases.h"
 #include "param_ids.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <dlfcn.h>
 #include <sched.h>
+#include <string>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -39,8 +59,26 @@ constexpr double kRate = 44100.0;
 constexpr double kBudgetUs = kBlock * 1e6 / kRate;   // 2902 us
 constexpr double kBpm = 128.0;
 constexpr int kMaxInstances = 4;
+// Before anything is timed the lines fill and the ring records: 4 s is eight beats at 128 BPM, the farthest back a
+// pattern reads, and longer than the longest delay the Echo's lines are set to.
+constexpr double kWarmSeconds = 4.0;
 
 VstTimeInfo g_time{};
+bool g_count = false;   // -m
+int g_case = 0;
+
+// -m: the events tools/gfcount.c counts by. 4000 is no system call: without the plugin it does nothing.
+enum Mark { kBlockStart, kBlockEnd, kCaseEnd, kProfileOn, kProfileOff };
+void mark(Mark op, long arg = 0) {
+    if (g_count) syscall(4000, static_cast<long>(op), arg);
+}
+
+bool wanted(int c) {
+    const char* e = std::getenv("GF_CASES");
+    if (!e || !*e) return true;
+    const std::string s = std::string(",") + e + ",";
+    return s.find("," + std::to_string(c) + ",") != std::string::npos;
+}
 
 intptr_t master(AEffect*, int32_t op, int32_t, intptr_t, void*, float) {
     if (op == vst::audioMasterVersion) return 2400;
@@ -54,76 +92,37 @@ double cpuUs() {
     return static_cast<double>(ts.tv_sec) * 1e6 + static_cast<double>(ts.tv_nsec) * 1e-3;
 }
 
-// A real value (dB, ms, Hz, 0..1, an option's index) as MPC's 0..1: the curves of groove_map.cpp's paramNorm.
-float norm(int id, float v) {
-    const ParamSpec& s = PARAM_SPECS[id];
-    float n = 0.0f;
-    switch (s.curve) {
-        case Curve::Lin:
-        case Curve::Int: n = s.hi > s.lo ? (v - s.lo) / (s.hi - s.lo) : 0.0f; break;
-        case Curve::Log: n = v > 0.0f ? std::log(v / s.lo) / std::log(s.hi / s.lo) : 0.0f; break;
-        case Curve::Enum: n = s.hi > 0.0f ? v / s.hi : 0.0f; break;
-        default: break;
-    }
-    return std::clamp(n, 0.0f, 1.0f);
-}
+// A case: its settings, how many instances run it one after another, how many parts (of Shape, Pump, Echo and Time)
+// it has on, and the Move whose tile must be lit while it plays (null: no Move).
+struct Case {
+    const char* name;
+    void (*setup)(AEffect*);
+    int instances;
+    int parts;
+    const char* move;
+};
 
-void num(AEffect* e, int id, float v) { e->setParameter(e, id, norm(id, v)); }
+void noSetup(AEffect*) {}
 
-// An option by its name, as surface.py shows it: a renamed option stops the bench instead of being measured as another.
-void opt(AEffect* e, int id, const char* name) {
-    const ParamInfo& p = PARAM_INFO[id];
-    for (int o = 0; o < p.nopts; ++o)
-        if (!std::strcmp(p.opts[o], name)) {
-            num(e, id, static_cast<float>(o));
-            return;
-        }
-    std::fprintf(stderr, "gfbench: %s has no option \"%s\"\n", p.key, name);
-    std::exit(1);
-}
-
-enum Case { kOff, kPump, kShape, kBoth, kFour };
-
-void pumpHeaviest(AEffect* e) {
-    opt(e, P_PUMP_ON, "On");
-    opt(e, P_PUMP_RATE, "1/16");
-    opt(e, P_PUMP_BAND, "Lows");
-    opt(e, P_PUMP_TRIGGER, "Input");
-    num(e, P_PUMP_DEPTH, 1.0f);
-    num(e, P_PUMP_PUSH, -10.0f);
-}
-
-void shapeHeaviest(AEffect* e) {
-    opt(e, P_SHAPE_ON, "On");
-    opt(e, P_VOL_ON, "On");
-    opt(e, P_FLT_ON, "On");
-    opt(e, P_PAN_ON, "On");
-    opt(e, P_VOL_RATE, "1/16");
-    opt(e, P_FLT_RATE, "1/16");
-    opt(e, P_PAN_RATE, "1/16");
-    opt(e, P_FLT_TYPE, "BP");
-    opt(e, P_FLT_SHAPE, "Random Smooth");
-    num(e, P_FLT_RESO, 1.0f);
-    num(e, P_FLT_CUTOFF, 1000.0f);
-    num(e, P_VOL_DEPTH, 1.0f);
-    num(e, P_FLT_DEPTH, 1.0f);
-    num(e, P_PAN_DEPTH, 1.0f);
-}
-
-void configure(AEffect* e, Case c) {
-    if (c == kPump || c == kBoth || c == kFour) pumpHeaviest(e);
-    if (c == kShape || c == kBoth || c == kFour) shapeHeaviest(e);
-    if (c == kBoth || c == kFour) {
-        num(e, P_SWING, 0.75f);
-        opt(e, P_SWING_UNIT, "1/16");
-    }
-}
+const Case kCases[] = {
+    {"everything off: Init", noSetup, 1, 0, nullptr},
+    {"Pump heaviest", gfc::pumpHeaviest, 1, 1, nullptr},
+    {"Shape heaviest", gfc::shapeHeaviest, 1, 1, nullptr},
+    {"Both heaviest, swing 75%", gfc::bothHeaviest, 1, 2, nullptr},
+    {"Four instances, Both heaviest (sum)", gfc::bothHeaviest, 4, 2, nullptr},
+    {"Echo heaviest", gfc::echoHeaviest, 1, 1, nullptr},
+    {"Echo heaviest, Fade glide, Ping-Pong", gfc::echoFadeHeaviest, 1, 1, nullptr},
+    {"Time playing Roll Build 1 Bar", gfc::timeRoll, 1, 1, gfc::kRollMove},
+    {"Time in fades: Stutter 1/16", gfc::timeFades, 1, 1, gfc::kFadesMove},
+    {"Everything heaviest", gfc::everythingHeaviest, 1, 4, gfc::kRollMove},
+};
+constexpr int kNumCases = static_cast<int>(sizeof kCases / sizeof kCases[0]);
 
 AEffect* create(void* lib) {
     auto entry = reinterpret_cast<AEffect* (*)(audioMasterCallback)>(dlsym(lib, "VSTPluginMain"));
     AEffect* e = entry ? entry(master) : nullptr;
     if (!e) {
-        std::fprintf(stderr, "no plugin\n");
+        std::fprintf(stderr, "gfbench: no VSTPluginMain, or it made no plugin\n");
         std::exit(1);
     }
     e->dispatcher(e, vst::effOpen, 0, 0, nullptr, 0.0f);
@@ -152,34 +151,90 @@ struct Source {
     }
 };
 
-Result runCase(void* lib, int seconds, const char* name, Case c, int instances = 1) {
+// How many parts the status line says ran in its last half second ("CPU 1%   PEAK 3%   2 OF 4 ON").
+int partsRunning(AEffect* e) {
+    char b[160] = {};
+    e->dispatcher(e, vst::effGetParamDisplay, P_STATUS, 0, b, 0.0f);
+    int cpu = 0, peak = 0, n = -1, of = 0;
+    return std::sscanf(b, "CPU %d%% PEAK %d%% %d OF %d ON", &cpu, &peak, &n, &of) == 4 ? n : -1;
+}
+
+// The case does what it says: the parts it has on ran, and its Move plays.
+void checkRunning(AEffect* e, const Case& c, const char* when) {
+    const int ran = partsRunning(e);
+    if (ran != c.parts) {
+        std::fprintf(stderr, "gfbench: \"%s\": %s the status line says %d parts ran, the case has %d on\n", c.name, when, ran,
+                     c.parts);
+        std::exit(1);
+    }
+    if (c.move && !(e->getParameter(e, gfc::tileOf(c.move)) > 0.5f)) {
+        std::fprintf(stderr, "gfbench: \"%s\": %s the Move %s is not playing (its tile is dark)\n", c.name, when, c.move);
+        std::exit(1);
+    }
+}
+
+Result runCase(void* lib, int seconds, const Case& c) {
+    const int me = g_case++;
+    if (!wanted(me)) return Result{0, 0, 0};
+    if (g_count) {
+        std::printf("case %d: %s\n", me, c.name);
+        std::fflush(stdout);   // before gfcount's line (qemu's stderr)
+    }
     AEffect* e[kMaxInstances] = {};
     std::vector<Source> src;
-    for (int k = 0; k < instances; ++k) {
+    for (int k = 0; k < c.instances; ++k) {
         e[k] = create(lib);
-        configure(e[k], c);
+        c.setup(e[k]);
         src.emplace_back(12345u + 977u * static_cast<uint32_t>(k));
     }
-    g_time.ppqPos = 0.0;
+    g_time.ppqPos = 0.0;   // every case from the song's start: one on its own runs as in the whole run
     long long frame = 0;
+    uint64_t hash = 1469598103934665603ull;   // FNV-1a over every output sample's bits
+    const auto digest = [&] {
+        for (const Source& s : src)
+            for (int i = 0; i < kBlock; ++i)
+                for (const float v : {s.L[static_cast<size_t>(i)], s.R[static_cast<size_t>(i)]}) {
+                    uint32_t u;
+                    std::memcpy(&u, &v, 4);
+                    hash = (hash ^ u) * 1099511628211ull;
+                }
+    };
     const auto block = [&](bool timed, double* us) {
-        for (int k = 0; k < instances; ++k) src[static_cast<size_t>(k)].fill(frame);
+        for (int k = 0; k < c.instances; ++k) src[static_cast<size_t>(k)].fill(frame);
         const double t0 = timed ? cpuUs() : 0.0;
-        for (int k = 0; k < instances; ++k) {
+        if (timed) mark(kBlockStart);
+        for (int k = 0; k < c.instances; ++k) {
             Source& s = src[static_cast<size_t>(k)];
             float* io[2] = {s.L.data(), s.R.data()};
             e[k]->processReplacing(e[k], io, io, kBlock);
         }
-        if (timed) *us = cpuUs() - t0;
+        if (timed) {
+            mark(kBlockEnd);
+            *us = cpuUs() - t0;
+        }
+        digest();
         frame += kBlock;
         g_time.ppqPos += kBlock / kRate * g_time.tempo / 60.0;
     };
-    for (int b = 0; b < 256; ++b) block(false, nullptr);   // the settings land, the parts fade in
+    const int warm = static_cast<int>(kWarmSeconds * kRate) / kBlock;
+    for (int b = 0; b < warm; ++b) block(false, nullptr);   // the settings land, the parts fade in, the lines fill
+    for (int k = 0; k < c.instances; ++k) checkRunning(e[k], c, "after the warm-up,");
+    const uint64_t hashWarm = hash;
     const int blocks = seconds * static_cast<int>(kRate) / kBlock;
     std::vector<double> t(static_cast<size_t>(blocks));
+    mark(kProfileOn);
     for (int b = 0; b < blocks; ++b) block(true, &t[static_cast<size_t>(b)]);
-    for (int k = 0; k < instances; ++k) e[k]->dispatcher(e[k], vst::effClose, 0, 0, nullptr, 0.0f);
+    mark(kProfileOff);
+    for (int k = 0; k < c.instances; ++k) checkRunning(e[k], c, "at the end,");
+    for (int k = 0; k < c.instances; ++k) e[k]->dispatcher(e[k], vst::effClose, 0, 0, nullptr, 0.0f);
 
+    if (g_count) {   // the counts are gfcount's; the hashes, of the warm-up and of the whole case
+        mark(kCaseEnd, me);
+        std::printf("HASH case=%d warm=%016llx all=%016llx\n", me, static_cast<unsigned long long>(hashWarm),
+                    static_cast<unsigned long long>(hash));
+        std::fflush(stdout);
+        return Result{0, 0, 0};
+    }
     std::vector<double> s = t;
     std::sort(s.begin(), s.end());
     double sum = 0.0;
@@ -187,26 +242,26 @@ Result runCase(void* lib, int seconds, const char* name, Case c, int instances =
     const Result r{100.0 * sum / blocks / kBudgetUs, 100.0 * s[static_cast<size_t>(blocks * 0.99)] / kBudgetUs,
                    100.0 * s.back() / kBudgetUs};
     // The verdict is per instance: a quarter of four instances' sum.
-    const double share = r.p99 / instances, worst = r.max / instances;
+    const double share = r.p99 / c.instances, worst = r.max / c.instances;
     const char* verdict = share <= 15.0 && worst <= 50.0 ? "PASS" : share <= 35.0 && worst <= 80.0 ? "WARN" : "FAIL";
-    std::printf("  %-38s avg %5.2f%%  p99 %5.2f%%  max %5.2f%%  %s\n", name, r.avg, r.p99, r.max, verdict);
-    if (instances > 1)
-        std::printf("  %-38s avg %5.2f%%  p99 %5.2f%%  max %5.2f%%\n", "  per instance", r.avg / instances, share,
-                    worst);
-    return {r.avg / instances, share, worst};
+    std::printf("  %-38s avg %5.2f%%  p99 %5.2f%%  max %5.2f%%  %s\n", c.name, r.avg, r.p99, r.max, verdict);
+    if (c.instances > 1)
+        std::printf("  %-38s avg %5.2f%%  p99 %5.2f%%  max %5.2f%%\n", "  per instance", r.avg / c.instances, share, worst);
+    return {r.avg / c.instances, share, worst};
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <plugin.so> [-s seconds] [-c cpu]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <plugin.so> [-s seconds] [-c cpu] [-m]\n", argv[0]);
         return 2;
     }
     int seconds = 3, cpu = 1;
-    for (int i = 2; i + 1 < argc; i += 2) {
-        if (!std::strcmp(argv[i], "-s")) seconds = std::max(1, std::atoi(argv[i + 1]));
-        else if (!std::strcmp(argv[i], "-c")) cpu = std::atoi(argv[i + 1]);
+    for (int i = 2; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "-m")) g_count = true;
+        else if (!std::strcmp(argv[i], "-s") && i + 1 < argc) seconds = std::max(1, std::atoi(argv[++i]));
+        else if (!std::strcmp(argv[i], "-c") && i + 1 < argc) cpu = std::atoi(argv[++i]);
     }
     if (cpu >= 0) {   // -c -1: don't pin (x86 runs, CI)
         cpu_set_t set;
@@ -229,13 +284,21 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::printf("%s, %d s per case\n", argv[1], seconds);
+    if (g_count) {   // where the .so and the libraries lie, for a profile's addresses (gfcount's prof=)
+        Dl_info di;
+        if (dladdr(dlsym(lib, "VSTPluginMain"), &di)) std::printf("BASE %p\n", di.dli_fbase);
+        if (FILE* m = std::fopen("/proc/self/maps", "r")) {   // MAP <start>-<end> <perms> <offset> ... <path>
+            char line[512];
+            while (std::fgets(line, sizeof line, m)) std::printf("MAP %s", line);
+            std::fclose(m);
+        }
+        std::fflush(stdout);
+    }
     bool fail = false;
-    const auto check = [&fail](const Result& r) { fail = fail || !(r.p99 <= 35.0 && r.max <= 80.0); };
-    check(runCase(lib, seconds, "everything off: Init", kOff));
-    check(runCase(lib, seconds, "Pump heaviest", kPump));
-    check(runCase(lib, seconds, "Shape heaviest", kShape));
-    check(runCase(lib, seconds, "Both heaviest, swing 75%", kBoth));
-    check(runCase(lib, seconds, "Four instances, Both heaviest (sum)", kFour, 4));
+    for (int i = 0; i < kNumCases; ++i) {
+        const Result r = runCase(lib, seconds, kCases[i]);
+        fail = fail || !(r.p99 <= 35.0 && r.max <= 80.0);
+    }
     dlclose(lib);
     return fail ? 1 : 0;
 }

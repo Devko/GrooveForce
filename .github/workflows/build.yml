@@ -25,6 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make test
+      # The bench on x86 says nothing about the Force's CPU; it runs here because every case reads its settings back and
+      # checks that the parts it sets ran (tools/cases.h), so a renamed key or option, or a Move that does not play,
+      # fails the build instead of being timed as another case.
+      - run: make bench
 
   device:
     name: Device build (armhf, glibc 2.31, PGO), package, catalog check
