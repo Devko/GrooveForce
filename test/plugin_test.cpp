@@ -5,8 +5,9 @@
 //
 // What is tested here is the glue and the chain behind it: the parameters, their texts and their map onto
 // the chain (grooveParams), the presets and the project state, the redraws and the status line, the Pump on
-// MPC's grid (pumpThroughMpc), suspend and resume with the Pump running, and that nothing hostile gets out
-// of the whole thing at once (stress). The modules' own behaviour is in their suites.
+// MPC's grid (pumpThroughMpc), and suspend and resume with the Pump running. The Echo, Time and the Moves through the
+// plugin, and 60 s of everything at once, are test/plugin_moves_test.cpp; the fixtures and the helpers the two use are in
+// test/host.h. The modules' own behaviour is in their suites.
 #include "host.h"
 #include "../plugin/presets.h"
 #include "../plugin/surface.h"
@@ -49,22 +50,6 @@ namespace {
 using namespace gf;
 namespace fs = std::filesystem;
 
-constexpr float kCeiling = 7.9433f;   // +18 dBFS: the most that ever leaves the plugin
-
-bool starts(const std::string& s, const char* with) { return s.compare(0, std::strlen(with), with) == 0; }
-bool has(const std::string& s, const std::string& part) { return s.find(part) != std::string::npos; }
-
-// A small deterministic generator (0..1), so a failure reproduces.
-struct Rng {
-    uint32_t seed;
-    explicit Rng(uint32_t s) : seed(s) {}
-    float next() {
-        seed = seed * 1664525u + 1013904223u;
-        return static_cast<float>(seed >> 8) / 16777216.0f;
-    }
-    int below(int n) { return std::min(static_cast<int>(next() * static_cast<float>(n)), n - 1); }
-};
-
 // Every sound parameter at a value of its own: an option picked by name, a number somewhere in its range.
 void spread(Host& h, Rng& rng) {
     for (int i = 0; i < P_COUNT; ++i) {
@@ -74,62 +59,16 @@ void spread(Host& h, Rng& rng) {
     }
 }
 
-// The sound parameters of two instances alike (a state is written with six digits).
-bool sameSound(Host& a, Host& b) {
-    bool same = true;
-    for (int i = 0; i < P_COUNT; ++i)
-        if (PARAM_INFO[i].kind == Kind::Synth && std::fabs(a.get(i) - b.get(i)) > 2e-5f) {
-            std::printf("  differs: %s %.6f / %.6f\n", PARAM_INFO[i].key, static_cast<double>(a.get(i)), static_cast<double>(b.get(i)));
-            same = false;
-        }
-    return same;
-}
-
 bool allDefaults(Host& h) {
     for (int i = 0; i < P_COUNT; ++i)
         if (PARAM_INFO[i].kind == Kind::Synth && std::fabs(h.get(i) - PARAM_INFO[i].def) > 2e-5f) return false;
     return true;
 }
 
-// The user presets of earlier tests gone, so "User 001" is the first save of this one.
-void freshUserPresets() {
-    std::error_code ec;
-    fs::remove_all(fixtureDir() + "/presets/User", ec);
-}
-
-constexpr int kBeat = 22050;   // a quarter note at 120 BPM, in samples
-constexpr float kDuck = 0.005f;   // a duck is the output under this, a hundredth of the 0.5 the tests feed
-// The steepest step of that 0.5 when its gain moves a full scale in a millisecond (and 10% more).
-constexpr float kSlope = 0.5f / 44.1f * 1.1f;
-
 // A steady input through the plugin, the output appended to `all`: the host's timeline from where it began.
 void runDc(Host& h, Buf& all, int blocks, float l = 0.5f, float r = 0.25f) {
     h.run(Buf(static_cast<size_t>(blocks) * kBlock, l), Buf(static_cast<size_t>(blocks) * kBlock, r));
     all.insert(all.end(), h.L.begin(), h.L.end());
-}
-
-// Where the output goes under `below`: the first sample of each duck.
-std::vector<int> ducks(const Buf& x, float below) {
-    std::vector<int> at;
-    for (size_t i = 0; i < x.size(); ++i)
-        if (x[i] < below && (i == 0 || x[i - 1] >= below)) at.push_back(static_cast<int>(i));
-    return at;
-}
-
-// The Pump as the tests use it: Hard, 1/4, the depth given, MPC playing at 120 BPM.
-void pumpOn(Host& h, float depth) {
-    h.on(P_PUMP_ON);
-    h.option(P_PUMP_CURVE, "Hard");
-    h.option(P_PUMP_RATE, "1/4");
-    h.set(P_PUMP_DEPTH, depth);
-    h.play(true);
-}
-
-// "1 OF 2 ON": the parts the status line says are running (-1: it doesn't say).
-int partsOn(Host& h) {
-    const std::string s = h.display(P_STATUS);
-    const size_t at = s.find(" OF 2 ON");
-    return at != std::string::npos && at > 0 && s[at - 1] >= '0' && s[at - 1] <= '9' ? s[at - 1] - '0' : -1;
 }
 
 std::string fileText(const std::string& path) {
@@ -571,14 +510,14 @@ void pumpThroughMpc() {
     CHECK(h.finite);
 }
 
-// The status line: what the plugin costs and how many of its two parts run, told to MPC (an UpdateDisplay) when it
-// changes. The first report is half a second of audio away, and so is each next one.
+// The status line: what the plugin costs and how many of its four parts (Shape, Pump, Echo, Time) run, told to MPC (an
+// UpdateDisplay) when it changes. The first report is half a second of audio away, and so is each next one.
 void statusLine() {
     std::printf("== the status line: CPU, PEAK and the parts that run\n");
     Host h;
     h.blocks(180);
     const std::string s = h.display(P_STATUS);
-    CHECK(starts(s, "CPU ") && has(s, "%   PEAK ") && has(s, "%   0 OF 2 ON"));
+    CHECK(starts(s, "CPU ") && has(s, "%   PEAK ") && has(s, "%   0 OF 4 ON"));
     int told = h.log.updates;
     auto settle = [&] {   // what the line says once the next report is out, and whether MPC was asked to read it again
         h.blocks(180);
@@ -590,13 +529,29 @@ void statusLine() {
     CHECK(settle() && partsOn(h) == 1);
     h.on(P_SHAPE_ON);
     CHECK(settle() && partsOn(h) == 2);
-    // A part aimed at the Echo has nothing to work on until plan 2: it rests, and is not counted.
+    // A part aimed at the Echo has nothing to work on while the Echo is off: it rests, and is not counted.
     h.option(P_SHAPE_TARGET, "Echo");
     CHECK(settle() && partsOn(h) == 1);
     h.option(P_SHAPE_TARGET, "All");
     CHECK(settle() && partsOn(h) == 2);
     h.option(P_PUMP_ON, "Off");   // not counted once its fade is over
     CHECK(settle() && partsOn(h) == 1);
+    h.option(P_SHAPE_ON, "Off");
+    CHECK(settle() && partsOn(h) == 0);
+    // The Echo and Time are parts too: counted from the first block after the switch (the plugin made their memory
+    // when they were switched on), and not once they have faded out.
+    h.on(P_ECHO_ON);
+    CHECK(settle() && partsOn(h) == 1);
+    h.on(P_TIME_ON);
+    CHECK(settle() && partsOn(h) == 2);
+    h.on(P_PUMP_ON);
+    h.on(P_SHAPE_ON);
+    CHECK(settle() && partsOn(h) == 4);
+    h.option(P_ECHO_ON, "Off");
+    CHECK(settle() && partsOn(h) == 3);
+    h.option(P_TIME_ON, "Off");
+    CHECK(settle() && partsOn(h) == 2);
+    h.option(P_PUMP_ON, "Off");
     h.option(P_SHAPE_ON, "Off");
     CHECK(settle() && partsOn(h) == 0);
     CHECK(starts(h.display(P_STATUS), "CPU "));
@@ -606,7 +561,8 @@ void detents() {
     std::printf("== a Q-Link detent moves a list one option\n");
     Host h;
     const int lists[] = {P_PUMP_CURVE, P_VOL_SHAPE, P_FLT_SHAPE, P_PAN_SHAPE, P_PUMP_RATE, P_FLT_RATE, P_PUMP_BAND,
-                         P_FLT_TYPE, P_SWING_UNIT, P_PUMP_TRIGGER, P_SHAPE_TARGET};
+                         P_FLT_TYPE, P_SWING_UNIT, P_PUMP_TRIGGER, P_SHAPE_TARGET, P_ECHO_ROUTE, P_A_MODE, P_D_FTYPE,
+                         P_A_DIV, P_B_MSHAPE, P_C_MRATE, P_TIME_GROOVE, P_MOVE, P_MOVE_QUANT};
     for (int id : lists) {
         const int n = PARAM_INFO[id].nopts;
         h.set(id, static_cast<float>(n / 2));   // mid-list: room both ways
@@ -1139,95 +1095,10 @@ void suspendPumping() {
     }
 }
 
-// MPC's transport doing odd things, and the host's too.
-void shake(Host& h, Rng& rng) {
-    static const double odd[] = {std::nan(""), INFINITY, -INFINITY, 1e300, -1e300, 0.0, -3.0, 1e15, -1e15};
-    const int oddCount = static_cast<int>(sizeof odd / sizeof odd[0]);
-    switch (rng.below(10)) {
-        case 0: h.log.time.ppqPos = rng.next() * 64.0 - 8.0; break;                       // a locate, also before the start
-        case 1: h.log.time.ppqPos = std::floor(rng.next() * 16.0) * 4.0; break;           // back to a loop's start
-        case 2: h.log.time.tempo = 30.0 + rng.next() * 270.0; break;                      // a tempo change
-        case 3: h.play(rng.next() < 0.5f); break;                                         // Play, Stop
-        case 4: h.log.noTime = rng.next() < 0.3f; break;                                  // a host with no time to give
-        case 5: h.log.time.flags ^= vst::kVstPpqPosValid; break;
-        case 6: h.log.time.flags ^= vst::kVstTempoValid; break;
-        case 7: h.log.time.tempo = odd[rng.below(oddCount)]; break;
-        case 8: h.log.time.ppqPos = odd[rng.below(oddCount)]; break;
-        default: h.log.time.ppqPos += (rng.next() - 0.5) * 0.01; break;                    // a position a hair off
-    }
-}
-
-// 60 s of random parameter writes, taps and detents, transport jumps and bursts of NaN and infinity in loud
-// input, with the chain (Pump, Shape, every lane, the targets, the levels) running a good part of the time: every
-// sample that leaves is a number, none above +18 dBFS, and Init afterwards is the input again.
-void stress() {
-    std::printf("== 60 s of everything at once, at random\n");
-    freshUserPresets();
-    Host h;
-    Rng rng(12345);
-    const int total = 60 * kBlocksPerSec;
-    float worst = 0.0f;
-    int saves = 0, anyOn = 0, bothOn = 0;
-    h.play(true);
-    for (int blk = 0; blk < total; ++blk) {
-        if (blk % kBlocksPerSec == kBlocksPerSec - 1) {   // once a second: how many parts the status line says run
-            const int parts = partsOn(h);
-            anyOn += parts >= 1;
-            bothOn += parts == 2;
-        }
-        for (int k = rng.below(4); k > 0; --k) {   // parameters: any value, in range or not
-            const int id = rng.below(P_COUNT);
-            if (PARAM_INFO[id].kind == Kind::Synth) {
-                static const float wild[] = {std::nanf(""), -1.0f, 2.0f, 1e30f, 0.0f, 1.0f};
-                if (rng.next() < 0.1f) h.setN(id, wild[rng.below(6)]);
-                else if (rng.next() < 0.3f) h.detent(id, rng.next() < 0.5f ? -1 : +1);
-                else h.setN(id, rng.next());
-            } else if (PARAM_INFO[id].kind != Kind::Readout && PARAM_INFO[id].kind != Kind::Popup) {
-                if (rng.next() > 0.1f) continue;   // the browser is over half the parameters: a preset load now and then, not all the time
-                if (id == P_PRE_SAVE && ++saves > 8) continue;   // a handful of files, not thousands
-                h.press(id);   // the browser: tiles, arrows, RND, favourites, Init, the stepper
-            }
-        }
-        if (rng.next() < 0.05f) shake(h, rng);
-        if (rng.next() < 0.002f) {   // a Stop and a resume, short or long
-            Turn t(rng.next() < 0.5f ? 100 : 300);
-            h.op(vst::effMainsChanged, 0, 0);
-            h.op(vst::effMainsChanged, 0, 1);
-        }
-        Buf l = whiteNoise(kBlock, rng.next() * 2.0f, static_cast<uint32_t>(blk) * 2u + 1u);
-        Buf r = whiteNoise(kBlock, rng.next() * 2.0f, static_cast<uint32_t>(blk) * 2u + 2u);
-        if (rng.next() < 0.04f) {   // a burst of what a broken host or a broken upstream plugin sends
-            static const float bad[] = {std::nanf(""), INFINITY, -INFINITY, 1e30f, -1e30f};
-            const int from = rng.below(kBlock), len = 1 + rng.below(40);
-            for (int i = from; i < std::min(kBlock, from + len); ++i) (rng.next() < 0.5f ? l : r)[static_cast<size_t>(i)] = bad[rng.below(5)];
-        }
-        h.run(l, r, rng.next() < 0.1f ? 1 + rng.below(300) : kBlock);
-        worst = std::max(worst, std::max(peak(h.L), peak(h.R)));
-    }
-    CHECK(h.finite);
-    std::printf("  highest peak over %d blocks: %.2f (%.1f dBFS)\n", total, static_cast<double>(worst), db(worst));
-    CHECK(worst <= kCeiling);
-    std::printf("  the status line said a part ran in %d of 60 seconds, both in %d\n", anyOn, bothOn);
-    CHECK(anyOn >= 20 && bothOn >= 3);   // the chain really was running, not resting through it
-    // Whatever was turned: Init is the input again, bit for bit, once the glides are over.
-    h.play(false);
-    h.log.noTime = false;
-    h.log.time.tempo = 120.0;
-    h.log.time.ppqPos = 0.0;
-    h.log.time.flags = vst::kVstTempoValid | vst::kVstPpqPosValid;
-    h.press(P_PRE_INIT);
-    h.blocks(8);
-    const Buf l = whiteNoise(kBlocksPerSec * kBlock, 0.5f, 21), r = whiteNoise(kBlocksPerSec * kBlock, 0.5f, 22);
-    h.run(l, r);
-    CHECK(h.L == l && h.R == r);
-    freshUserPresets();
-}
-
 } // namespace
-} // namespace eft
 
-void pluginTests() {
-    using namespace eft;
+// The suite's own fixtures: where the presets and the data go, the surface's clock that only moves per host event.
+void setupPluginTests() {
     const std::string root = fixtureDir();
     std::filesystem::create_directories(root + "/presets");
     std::filesystem::create_directories(root + "/data");
@@ -1240,25 +1111,35 @@ void pluginTests() {
         static long long t = 0;
         return t += g_msPerEvent;
     };
+}
+
+void cleanupPluginTests() {
+    std::error_code ec;
+    std::filesystem::remove_all(fixtureDir(), ec);
+}
+
+} // namespace eft
+
+void pluginTests() {
+    using namespace eft;
+    setupPluginTests();
 
     std::printf("== the plugin\n");
-    basics();
-    displays();
-    mapping();
-    passThrough();
-    levels();
-    pumpThroughMpc();
-    detents();
-    presetsRoundTrip();
-    freshInstance();
-    factoryPresets();
-    projectState();
-    displayRate();
-    statusLine();
-    suspendResume();
-    suspendPumping();
-    stress();
+    GF_RUN(basics);
+    GF_RUN(displays);
+    GF_RUN(mapping);
+    GF_RUN(passThrough);
+    GF_RUN(levels);
+    GF_RUN(pumpThroughMpc);
+    GF_RUN(detents);
+    GF_RUN(presetsRoundTrip);
+    GF_RUN(freshInstance);
+    GF_RUN(factoryPresets);
+    GF_RUN(projectState);
+    GF_RUN(displayRate);
+    GF_RUN(statusLine);
+    GF_RUN(suspendResume);
+    GF_RUN(suspendPumping);
 
-    std::error_code ec;
-    std::filesystem::remove_all(root, ec);
+    cleanupPluginTests();
 }

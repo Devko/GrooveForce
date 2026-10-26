@@ -1,6 +1,8 @@
 #include "groove_map.h"
 
 #include "../dsp/pump_curves.h"
+#include "moves.h"
+#include "move_data.h"
 #include "shape_data.h"
 
 #include <algorithm>
@@ -60,6 +62,55 @@ constexpr bool targets(int param) {
            optionIs(param, Groove::kEcho, "Echo");
 }
 
+// The four lines' parameters, line by line: grooveParams reads them through this table, so a key can only land on the field
+// its column names.
+struct LineIds {
+    int on, level, pan, sync, div, ms, fb, mode, ftype, cut, reso, place, drive, wow, mod, mshape, mrate, mcut, mtime, mlevel;
+};
+#define GF_LINE(X)                                                                                                      \
+    {P_##X##_ON,    P_##X##_LEVEL, P_##X##_PAN,   P_##X##_SYNC,  P_##X##_DIV,   P_##X##_MS,  P_##X##_FB,  P_##X##_MODE,   \
+     P_##X##_FTYPE, P_##X##_CUT,   P_##X##_RESO,  P_##X##_PLACE, P_##X##_DRIVE, P_##X##_WOW, P_##X##_MOD, P_##X##_MSHAPE, \
+     P_##X##_MRATE, P_##X##_MCUT,  P_##X##_MTIME, P_##X##_MLEVEL}
+constexpr LineIds kLineIds[Echo::kLines] = {GF_LINE(A), GF_LINE(B), GF_LINE(C), GF_LINE(D)};
+#undef GF_LINE
+
+// Every line's lists against the DSP's: the options are the DSP's enums and tables, in the DSP's order.
+constexpr bool linesMatch() {
+    for (const LineIds& l : kLineIds) {
+        if (!onOff(l.on)) return false;
+        if (!(PARAM_INFO[l.sync].nopts == 2 && optionIs(l.sync, 0, "Sync") && optionIs(l.sync, 1, "Free"))) return false;
+        if (!ratesMatch(l.div, kEchoDivs)) return false;
+        if (!(PARAM_INFO[l.mode].nopts == 3 && optionIs(l.mode, EchoLine::kStereo, "Stereo") &&
+              optionIs(l.mode, EchoLine::kPingPong, "Ping-Pong") && optionIs(l.mode, EchoLine::kMono, "Mono")))
+            return false;
+        if (!(PARAM_INFO[l.ftype].nopts == 3 && optionIs(l.ftype, EchoLine::kLP, "LP") && optionIs(l.ftype, EchoLine::kBP, "BP") &&
+              optionIs(l.ftype, EchoLine::kHP, "HP")))
+            return false;
+        if (!(PARAM_INFO[l.place].nopts == 2 && optionIs(l.place, EchoLine::kInLoop, "In Loop") &&
+              optionIs(l.place, EchoLine::kOnOutput, "On Output")))
+            return false;
+        if (!(PARAM_INFO[l.mod].nopts == 4 && optionIs(l.mod, EchoMod::kOff, "Off") && optionIs(l.mod, EchoMod::kLfo, "LFO") &&
+              optionIs(l.mod, EchoMod::kEnv, "Env") && optionIs(l.mod, EchoMod::kFollow, "Follow")))
+            return false;
+        if (!shapesMatch(l.mshape)) return false;
+        if (!ratesMatch(l.mrate, kShapeRates)) return false;
+    }
+    return true;
+}
+
+// The Moves: the Move parameter is None and then the sixteen in tile order (moves.cpp holds the tiles to the same names),
+// and the page's mode and quantize are Moves' own enums.
+constexpr bool movesMatch() {
+    const ParamInfo& p = PARAM_INFO[P_MOVE];
+    if (p.nopts != kNumMoves + 1 || !sameName(p.opts[0], "None")) return false;
+    for (int i = 0; i < kNumMoves; ++i)
+        if (!sameName(p.opts[i + 1], kMoves[i].name)) return false;
+    return PARAM_INFO[P_MOVE_MODE].nopts == 2 && optionIs(P_MOVE_MODE, Moves::kOneShot, "One Shot") &&
+           optionIs(P_MOVE_MODE, Moves::kLoop, "Loop") && PARAM_INFO[P_MOVE_QUANT].nopts == 3 &&
+           optionIs(P_MOVE_QUANT, Moves::kSixteenth, "1/16") && optionIs(P_MOVE_QUANT, Moves::kBeat, "Beat") &&
+           optionIs(P_MOVE_QUANT, Moves::kBar, "Bar");
+}
+
 } // namespace
 
 // The option lists in surface.py against the DSP's: a picked option is an index into the DSP's list or enum.
@@ -82,6 +133,27 @@ static_assert(PARAM_INFO[P_PUMP_BAND].nopts == 3 && optionIs(P_PUMP_BAND, Pump::
 static_assert(PARAM_INFO[P_FLT_TYPE].nopts == 3 && optionIs(P_FLT_TYPE, Shape::kLP, "LP") && optionIs(P_FLT_TYPE, Shape::kBP, "BP") &&
                   optionIs(P_FLT_TYPE, Shape::kHP, "HP"),
               "surface.py's Filter Type options must match Shape::FilterType");
+// The Echo, Time and the Moves (surface.py's ECHO_*, LINE_*, TIME_* and MOVE_* lists).
+static_assert(onOff(P_ECHO_ON) && onOff(P_ECHO_FREEZE) && onOff(P_TIME_ON), "surface.py ON_OFF: option 1 is On");
+static_assert(PARAM_INFO[P_ECHO_ORDER].nopts == 2 && optionIs(P_ECHO_ORDER, Groove::kEchoFirst, "Echo First") &&
+                  optionIs(P_ECHO_ORDER, Groove::kEchoLast, "Echo Last"),
+              "surface.py ECHO_ORDERS must match Groove::Order");
+static_assert(PARAM_INFO[P_ECHO_ROUTE].nopts == Echo::kRoutings && optionIs(P_ECHO_ROUTE, Echo::kParallel, "Parallel") &&
+                  optionIs(P_ECHO_ROUTE, Echo::kSerial, "Serial") && optionIs(P_ECHO_ROUTE, Echo::kPairs, "Pairs") &&
+                  optionIs(P_ECHO_ROUTE, Echo::kRing, "Ring") && optionIs(P_ECHO_ROUTE, Echo::kSpread, "Spread"),
+              "surface.py ECHO_ROUTES must match Echo::Routing");
+static_assert(PARAM_INFO[P_ECHO_GLIDE].nopts == 2 && optionIs(P_ECHO_GLIDE, EchoLine::kTape, "Tape") &&
+                  optionIs(P_ECHO_GLIDE, EchoLine::kFade, "Fade"),
+              "surface.py ECHO_GLIDES must match EchoLine::Glide");
+static_assert(linesMatch(), "surface.py's line lists (LINE_*, ECHO_DIVS, SHAPE_NAMES, SHAPE_RATES) must match the DSP's");
+static_assert(PARAM_INFO[P_TIME_PLACE].nopts == 2 && optionIs(P_TIME_PLACE, Groove::kPost, "Post") &&
+                  optionIs(P_TIME_PLACE, Groove::kPre, "Pre"),
+              "surface.py TIME_PLACES must match Groove::Place");
+static_assert(PARAM_INFO[P_TIME_GROOVE].nopts == 4 && optionIs(P_TIME_GROOVE, Time::kOff, "Off") &&
+                  optionIs(P_TIME_GROOVE, Time::kSwing, "Swing") && optionIs(P_TIME_GROOVE, Time::kDrunk, "Drunk") &&
+                  optionIs(P_TIME_GROOVE, Time::kPush, "Push"),
+              "surface.py TIME_GROOVES must match Time::Groove");
+static_assert(movesMatch(), "surface.py MOVE_NAMES, MOVE_MODES and MOVE_QUANTS must match plugin/moves.h");
 
 float paramValue(int id, float n) {
     if (id < 0 || id >= P_COUNT) return 0.0f;
@@ -168,6 +240,50 @@ Groove::Params grooveParams(const float* n) {
     p.inputDb = rest(P_INPUT, 0.0f);
     p.outputDb = rest(P_OUTPUT, 0.0f);
     p.mix = rest(P_MIX, 1.0f);
+    p.dry = rest(P_DRY, 1.0f);
+    p.order = pick(P_ECHO_ORDER);
+    p.timeOn = pick(P_TIME_ON) == 1;
+    p.timePlace = pick(P_TIME_PLACE);
+    p.time.groove = pick(P_TIME_GROOVE);
+    p.time.amount = v(P_TIME_AMOUNT);   // (a Move's pattern is the engine's: Time::Params::pattern is not a parameter)
+
+    // The Echo: its own controls, then the four lines.
+    p.echoOn = pick(P_ECHO_ON) == 1;
+    Echo::Params& e = p.echo;
+    e.routing = pick(P_ECHO_ROUTE);
+    e.send = rest(P_ECHO_SEND, 1.0f);
+    e.duck = rest(P_ECHO_DUCK, 0.0f);
+    e.freeze = pick(P_ECHO_FREEZE) == 1;
+    e.glide = pick(P_ECHO_GLIDE);
+    e.width = rest(P_ECHO_WIDTH, 1.0f);
+    e.level = rest(P_ECHO_LEVEL, 1.0f);
+    e.feedbackOffset = rest(P_ECHO_FB, 0.0f);
+    e.toneOct = 4.0f * rest(P_ECHO_TONE, 0.0f);   // -1..1 is four octaves either way
+    e.sensitivity = v(P_ECHO_SENS);
+    for (int i = 0; i < Echo::kLines; ++i) {
+        const LineIds& k = kLineIds[i];
+        Echo::Line& q = e.line[i];
+        q.on = pick(k.on) == 1;
+        q.level = v(k.level);
+        q.pan = rest(k.pan, 0.0f);
+        q.p.sync = pick(k.sync) == 0;   // Sync | Free
+        q.p.divBeats = kEchoDivs[pick(k.div)].beats;
+        q.p.timeMs = v(k.ms);
+        q.p.feedback = v(k.fb);
+        q.p.mode = pick(k.mode);
+        q.p.filterType = pick(k.ftype);
+        q.p.cutoffHz = rest(k.cut, 20000.0f, 1.0f);   // (a low-pass at 20 kHz is no filter)
+        q.p.resonance = rest(k.reso, 0.0f);
+        q.p.place = pick(k.place);
+        q.p.drive = rest(k.drive, 0.0f);
+        q.p.wow = rest(k.wow, 0.0f);
+        q.mod.mode = pick(k.mod);
+        q.mod.shape = pick(k.mshape);
+        q.mod.rateBeats = kShapeRates[pick(k.mrate)].beats;
+        q.modCutoff = rest(k.mcut, 0.0f);
+        q.modTime = rest(k.mtime, 0.0f);
+        q.modLevel = rest(k.mlevel, 0.0f);
+    }
 
     Pump::Params& u = p.pump;
     u.rateBeats = kPumpRates[pick(P_PUMP_RATE)].beats;

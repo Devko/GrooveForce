@@ -1304,7 +1304,7 @@
   },
   {
    "key": "a_place",
-   "name": "A Filter Place",
+   "name": "A Flt Place",
    "options": [
     "In Loop",
     "On Output"
@@ -1573,7 +1573,7 @@
   },
   {
    "key": "b_place",
-   "name": "B Filter Place",
+   "name": "B Flt Place",
    "options": [
     "In Loop",
     "On Output"
@@ -1842,7 +1842,7 @@
   },
   {
    "key": "c_place",
-   "name": "C Filter Place",
+   "name": "C Flt Place",
    "options": [
     "In Loop",
     "On Output"
@@ -2111,7 +2111,7 @@
   },
   {
    "key": "d_place",
-   "name": "D Filter Place",
+   "name": "D Flt Place",
    "options": [
     "In Loop",
     "On Output"
