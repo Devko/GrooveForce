@@ -9,7 +9,8 @@ list may still change between releases.
 The first version, a preview: four parts, **Pump**, **Shape**, **Echo** and **Time**, 16 one-tap
 **Moves** and factory presets by job. The Pump, the Shape and the swing were played on a Force
 (MPC OS 3.x) on 2026-10-26 and work. The Echo, Time and the Moves pass the test suite on x86 and under
-ARM emulation and have not been played on a device yet.
+ARM emulation and run on the Force within their CPU budget (everything at its heaviest: 10% of a block at
+p99), but have not been judged by ear yet.
 
 - **Pump:** a duck on MPC's grid with no sidechain: five rates (1/16 to 1 bar), ten named recoveries,
   depth, length, a push from 10 ms early to 30 ms late; locked to the grid or fired by the input's own

@@ -8,10 +8,11 @@ on the same groundwork. It pumps, shapes, echoes and bends time: a shortcut to a
 a showpiece. Four parts, **Pump**, **Shape**, **Echo** and **Time**, and 16 one-tap **Moves**.
 
 > [!NOTE]
-> **Preview (0.0.1, not released yet).** All four parts, the Moves and the factory presets are built and
-> pass the full suite on x86 and under ARM emulation. The Pump, the Shape and the swing were played on a
-> Force (MPC OS 3.x) on 2026-10-26 and work. The Echo, Time and the Moves have not been played on a
-> device yet. The parameter list may still change before v0.1. What it costs on the Force is in
+> **Preview (0.0.1).** All four parts, the Moves and the factory presets are built and pass the full
+> suite on x86 and under ARM emulation. The Pump, the Shape and the swing were played on a Force
+> (MPC OS 3.x) on 2026-10-26 and work. The Echo, Time and the Moves run on the Force within their CPU
+> budget (installed and benched on 2026-10-27) but have not been judged by ear yet. The parameter list
+> may still change before v0.1. What it costs on the Force is in
 > [docs/PERFORMANCE.md](docs/PERFORMANCE.md); the design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## What works now

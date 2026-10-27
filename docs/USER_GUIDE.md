@@ -684,7 +684,8 @@ the echoes ring on through it.
   insert.
 - **4/4 only.** A bar is four beats everywhere.
 - **Not yet heard on the Force:** the Echo, Time and the Moves pass the test suite on x86 and under
-  ARM emulation, but have not been played on a device. How the Move tiles tap there (a second tap on
+  ARM emulation and run on the Force within their CPU budget, but have not been judged by ear yet. How
+  the Move tiles tap there (a second tap on
   the same tile within a second is taken for MPC's release echo and ignored) and how the new
   presets sound are for the Force to say.
 
