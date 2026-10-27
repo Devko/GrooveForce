@@ -4,7 +4,8 @@
 // "grooveforce 1": key=value lines for every sound parameter: REAL values (dB, ms, Hz, 0..1) and
 // options by name ("pump_curve=Hard", "vol_shape=Offbeat Accent"; an index is read too). A project adds
 // the preset it came from. Survives parameters being added or reordered AND ranges changing: a key it
-// doesn't know is skipped, and a project changes only what it lists.
+// doesn't know is skipped, and a project changes only what it lists. The selected Move (`move`) is saved like any
+// other sound parameter; loading it only selects it, and ends the Move that plays (Surface::noteLoad).
 #include "surface.h"
 
 #include <string>

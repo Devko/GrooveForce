@@ -17,6 +17,8 @@
 // plus its phase: cycles = toStraight(beats) / rateBeats + phase. While MPC plays (and says where)
 // that is MPC's beat; so a loop, a locate or a tempo change leaves the lane on the grid. Stopped, the
 // cycle runs on at the tempo from where it was, and starting to play moves it to the song position.
+// The first set() after reset() takes the song position whether MPC plays or not (when it says where),
+// so a lane reset while stopped at beat 9.5 starts at beat 9.5 and not at 0.
 // The random shapes are seeded by the whole cycle, so a one-bar loop plays the same bar every time.
 //
 // Per chunk (set() is called once per chunk, 32 samples) each running lane evaluates its shape at the
@@ -88,6 +90,16 @@ public:
     void set(const Params& p, const ef::Transport& t);
     void process(float* L, float* R, int n);
     int tailSamples() const { return tail_; }   // 0 unless the filter lane is on (then its ring)
+
+    // Starts as another Shape is now (ruling R48): the instance that begins while its twin has been running (the
+    // wet's Shape of a part on All) takes the twin's lane positions, slews and filter settings, so the two move
+    // alike from the next sample. What the audio left in the filter is not taken, since it is the other bus's
+    // signal: the filter is linear, so the twin keeps its own ring and this one starts with none, and the two
+    // together are what one filter on the sum would be.
+    void copyStateFrom(const Shape& o) {
+        *this = o;
+        s_.clear();
+    }
 
 private:
     // A value that goes in a straight line across a chunk: the sample i of it is cur + step i.

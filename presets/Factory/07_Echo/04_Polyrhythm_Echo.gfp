@@ -1,0 +1,24 @@
+grooveforce 1
+echo_on=On
+echo_route=Parallel
+echo_duck=0.4
+a_on=On
+a_level=0.5
+a_pan=-0.6
+a_div=1/8.
+a_fb=0.45
+a_ftype=HP
+a_cut=400
+b_on=On
+b_level=0.5
+b_pan=0.6
+b_div=5/16
+b_fb=0.45
+b_ftype=HP
+b_cut=400
+c_on=On
+c_level=0.4
+c_div=7/16
+c_fb=0.4
+c_ftype=HP
+c_cut=600

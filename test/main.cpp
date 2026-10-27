@@ -13,10 +13,16 @@ void pumpCurvesTests();
 void shapesTests();
 void transientTests();
 void crossoverTests();
+void timeTests();
 void pumpTests();
 void shapeTests();
 void grooveTests();
+void echoModTests();
+void movesTests();
 void pluginTests();
+void pluginMovesTests();
+void echoLineTests();
+void echoTests();
 
 int main() {
     dspTests();
@@ -25,10 +31,16 @@ int main() {
     shapesTests();
     transientTests();
     crossoverTests();
+    timeTests();
     pumpTests();
     shapeTests();
     grooveTests();
+    echoModTests();
+    movesTests();
     pluginTests();
+    pluginMovesTests();
+    echoLineTests();
+    echoTests();
     std::printf("%d passed, %d failed\n", eft::g_pass, eft::g_fail);
     return eft::g_fail ? 1 : 0;
 }

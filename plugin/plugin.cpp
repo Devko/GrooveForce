@@ -2,21 +2,25 @@
 //
 // The groove engine (plugin/engine.h) behind the touchscreen pages generated from surface/surface.py;
 // plugin/surface.* decides what every parameter does. The status line carries a CPU meter, so the
-// cost can be read on the device, and how many of the two parts (Pump, Shape) are running. What MPC
+// cost can be read on the device, and how many of the four parts (Shape, Pump, Echo, Time) are running. What MPC
 // does with an insert effect was measured first (EffectForce's docs/PROBE.md): it calls
 // processReplacing nonstop in place with 128 frames, suspends and resumes on transport Stop (~100 ms)
 // and for its slot's ON button (as long as it is off), and never calls effSetBypass. A short suspend
-// keeps every state (a Pump mid-duck goes on from there); only one over kLongSuspendMs clears them. MIDI into an
-// insert is not asked for until GrooveForce's probe says MPC sends it (docs/PROBE.md), so canDo says no.
+// keeps every state (a Pump mid-duck goes on from there, a Move goes on playing); only one over kLongSuspendMs clears
+// them. MIDI into an insert is not asked for until GrooveForce's probe says MPC sends it (docs/PROBE.md), so canDo says no.
 //
 // Threads: processReplacing runs on one of MPC's audio workers (which one changes between calls,
 // instances run concurrently); parameters, display text and chunks come from MPC's UI side. Host
-// callbacks are only made from processReplacing.
+// callbacks are only made from processReplacing. What the UI side wants of the audio side goes through the surface: the
+// sound's parameters as snapshots, and the Moves' calls (a tile, GO, the Move parameter, a load) as calls that runBlock
+// hands to the engine before each block. The memory the Echo and Time need is made on the UI side (provide()) as the switch
+// is set, or the Move that needs it is selected, and the audio side takes it up when it has arrived.
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 #include "vst2.h"
 #include "engine.h"
+#include "moves.h"
 #include "param_ids.h"
 #include "state.h"
 #include "surface.h"
@@ -138,6 +142,24 @@ std::string statusText(const Plugin* p) {
 
 // --- parameters (UI thread) ---------------------------------------------------------------
 
+// The memory something is about to need, made before the audio thread asks for it (R42): the Echo's lines when the Echo is
+// switched on, or the selected Move is one that works with them; Time's ring when Time is on, or the selected Move plays from
+// it (a tile tap selects its Move). A switch set, a Move picked, a preset or a project loaded: every way to need it ends here.
+// Cheap once it is done (an atomic load); the audio thread takes the memory up when it has arrived, and until then the part is
+// silent and costs nothing. UI thread.
+void provide(Plugin* p) {
+    const Surface& s = p->surface;
+    bool echo = s.get(P_ECHO_ON) > 0.5f, time = s.get(P_TIME_ON) > 0.5f;
+    const int picked = static_cast<int>(std::lround(s.get(P_MOVE) * static_cast<float>(PARAM_INFO[P_MOVE].nopts - 1)));   // 0: None
+    if (picked >= 1 && picked <= Moves::count()) {
+        const int parts = Moves::partsOf(picked - 1);
+        echo = echo || (parts & kPartEcho) != 0;
+        time = time || (parts & kPartTime) != 0;
+    }
+    if (echo) p->engine.allocateEcho();
+    if (time) p->engine.allocateTime();
+}
+
 // Nothing may throw into MPC (a preset load reads a file, allocates, parses).
 float getParameter(AEffect* e, int32_t i) {
     try {
@@ -153,6 +175,7 @@ void setParameter(AEffect* e, int32_t i, float v) {
         const bool traced = i >= 0 && i < P_COUNT && tracing();
         const float before = traced ? s.get(i) : 0.0f;   // what MPC last read back
         s.set(i, v);
+        provide(self(e));
         if (traced)
             trace("%p set %3d %-18s %.4f  read %.4f -> %.4f  \"%s\"", static_cast<void*>(e), static_cast<int>(i),
                   PARAM_INFO[i].key, static_cast<double>(v), static_cast<double>(before), static_cast<double>(s.get(i)),
@@ -201,8 +224,14 @@ void runBlock(Plugin* p, float* L, float* R, int n, const ef::Transport& tr) {
             p->havePatch = true;
         }
     }
-    if (p->clear.exchange(false)) p->engine.reset();
+    if (p->clear.exchange(false)) {
+        p->surface.dropMoveCalls();   // a tap made while it was off is not played when it comes back
+        p->engine.reset();
+    }
+    MoveCall call;   // the UI thread's calls: a load first, then the latest tap, GO or Move change (they coalesce)
+    while (p->surface.takeMoveCall(call)) p->engine.moveCall(call);
     p->engine.render(L, R, n, tr);
+    p->surface.moveLit(p->engine.litMoves());
     p->tail.store(p->engine.tailSamples(), std::memory_order_relaxed);
     guard(L, n);
     guard(R, n);
@@ -345,7 +374,9 @@ intptr_t dispatch(Plugin* p, int32_t op, int32_t idx, intptr_t val, void* ptr) {
             if (!ptr || val <= 0 || val > (1 << 20)) return 0;   // a state is ~1 KB; more is not ours
             std::string s(static_cast<const char*>(ptr), static_cast<size_t>(val));
             while (!s.empty() && s.back() == '\0') s.pop_back();
-            return loadState(p->surface, s, false) ? 1 : 0;
+            if (!loadState(p->surface, s, false)) return 0;
+            provide(p);   // a project with the Echo or Time on, or a Move that needs them selected, has its memory from the load
+            return 1;
         }
         default: return 0;
     }

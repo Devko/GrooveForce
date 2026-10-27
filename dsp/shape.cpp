@@ -1,11 +1,16 @@
 // Shape: see shape.h.
 #include "shape.h"
+#include "slew.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 
 namespace gf {
+
+// copyStateFrom() is a plain copy of the object: no allocation, nothing to fix up.
+static_assert(std::is_trivially_copyable<Shape>::value, "Shape is copied bit for bit");
 
 namespace {
 
@@ -26,12 +31,6 @@ constexpr float kFadeStep = ef::kChunk / (0.010f * ef::kRate);
 constexpr float kOctaveStep = 10.0f * kFadeStep;
 
 constexpr float kQuarterPi = 0.785398163f;
-
-// `cur` moved toward `target` by at most `step`; it lands on the target exactly.
-inline float approach(float cur, float target, float step) {
-    const float d = target - cur;
-    return d > step ? cur + step : (d < -step ? cur - step : target);
-}
 
 // cos(a) for |a| <= pi/4 as a short series (ef::sinQuarter does the sin): the pan's angle. Sin is exactly 0
 // and cos exactly 1 at 0, so a pan in the middle is unity gain to the bit.
@@ -91,11 +90,12 @@ void Shape::valuesOf(int lane, const LaneParams& q, double start, double end, fl
 
 void Shape::set(const Params& in, const ef::Transport& t) {
     const Params p = sanitized(in);
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    const double bpm = ef::tempoOf(t);
     perSample_ = bpm / (60.0 * ef::kRate);
     // Playing, the song position is MPC's (it moves for a locate, a loop, a tempo change). Otherwise
-    // the position runs on at the tempo from where it was (process() moves it).
-    if (t.playing && t.valid && std::isfinite(t.beats)) pos_ = t.beats;
+    // the position runs on at the tempo from where it was (process() moves it): from MPC's, the first
+    // chunk after reset(), if it says where, else from 0.
+    if (t.valid && std::isfinite(t.beats) && (t.playing || fresh_)) pos_ = t.beats;
     const double start = toStraight(pos_, p.swing);
     const double end = toStraight(pos_ + ef::kChunk * perSample_, p.swing);
 
@@ -126,8 +126,8 @@ void Shape::setGainLane(int lane, GainLane& s, const LaneParams& q, float cTarge
         if (fresh_) s.c.jump(cTarget);   // (else c is 0, and fades in)
     }
     s.shape.between(v0, v1);
-    s.c.to(approach(s.c.cur, cTarget, kFadeStep));
-    s.m.to(approach(s.m.cur, mTarget, kFadeStep));
+    s.c.to(toward(s.c.cur, cTarget, kFadeStep));
+    s.m.to(toward(s.m.cur, mTarget, kFadeStep));
 }
 
 // The glide's targets for the filter's state now.
@@ -182,13 +182,13 @@ void Shape::setFilter(const Params& p, double start, double end) {
     // The value's limiter over the chunk (as process() runs it for Volume and Pan): where it gets to by the end.
     if (v0 != fY_ || v1 != fY_) {
         const float dv = (v1 - v0) * (1.0f / ef::kChunk);
-        for (int i = 0; i < ef::kChunk; ++i) fY_ = approach(fY_, v0 + dv * static_cast<float>(i), kShapeSlope);
+        for (int i = 0; i < ef::kChunk; ++i) fY_ = toward(fY_, v0 + dv * static_cast<float>(i), kShapeSlope);
     }
-    fOct_ = approach(fOct_, derived_.oct, kOctaveStep);
-    fDepth_ = approach(fDepth_, d, kFadeStep);
-    fRes_ = approach(fRes_, p.resonance, kFadeStep);
-    for (int i = 0; i < 3; ++i) fType_[i] = approach(fType_[i], type[i], kFadeStep);
-    fWet_ = approach(fWet_, wet, kFadeStep);
+    fOct_ = toward(fOct_, derived_.oct, kOctaveStep);
+    fDepth_ = toward(fDepth_, d, kFadeStep);
+    fRes_ = toward(fRes_, p.resonance, kFadeStep);
+    for (int i = 0; i < 3; ++i) fType_[i] = toward(fType_[i], type[i], kFadeStep);
+    fWet_ = toward(fWet_, wet, kFadeStep);
 
     // Where the glide goes: nothing to do if nothing has moved since the last chunk.
     const float state[8] = {fOct_, fDepth_, fY_, fRes_, fType_[0], fType_[1], fType_[2], fWet_};
@@ -226,11 +226,11 @@ void Shape::process(float* L, float* R, int n) {
             x = x * (one - v[WET]) + s.tick(x, a, mix) * v[WET];   // exact at wet 0 and 1
         }
         if (vol) {
-            vy = approach(vy, vs.at(i), kShapeSlope);
+            vy = toward(vy, vs.at(i), kShapeSlope);
             x = x * ef::splat2(1.0f - vc.at(i) * (1.0f - vy));
         }
         if (pan) {
-            py = approach(py, ps.at(i), kPanSlope);
+            py = toward(py, ps.at(i), kPanSlope);
             const float a = kQuarterPi * (pc.at(i) * (2.0f * py - 1.0f));   // the angle from the middle
             const float sn = ef::sinQuarter(a), cs = cosSmall(a), m = pm.at(i);
             // sqrt2 cos(pi/4 + a) = cos a - sin a, sqrt2 sin(pi/4 + a) = cos a + sin a

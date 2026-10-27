@@ -1,8 +1,11 @@
 grooveforce 1
 shape_on=On
+shape_target=All
 flt_on=On
 flt_shape=Pump Smooth
 flt_rate=1/4
 flt_depth=0.6
+flt_type=LP
 flt_cutoff=6000
 flt_reso=0.3
+output=-0.4

@@ -1,0 +1,12 @@
+grooveforce 1
+swing=0.58
+swing_unit=1/16
+shape_on=On
+shape_target=All
+vol_on=On
+vol_shape=Rolling 16ths
+vol_rate=1 bar
+vol_depth=0.4
+time_on=On
+time_place=Post
+time_groove=Swing

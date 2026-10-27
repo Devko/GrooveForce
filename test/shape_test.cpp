@@ -466,15 +466,15 @@ void shapeStopped() {
         }
         return ok;
     };
-    // Nobody tells it the position (MPC reports beats 77.7 while stopped): it starts at 0 and runs at the tempo.
+    // MPC reports beat 80 (the start of a bar) while stopped: it starts there, and runs at the tempo.
     Buf L(3 * 44100, 1.0f), R = L;
-    render(p, L, R, transport(120.0, 77.7, false));
+    render(p, L, R, transport(120.0, 80.0, false));
     CHECK(stepsOk(L, k16th, 0));
     Buf L2(3 * 44100, 1.0f), R2 = L2;
-    render(p, L2, R2, transport(90.0, 77.7, false));   // slower: a 16th is 7350 samples
+    render(p, L2, R2, transport(90.0, 80.0, false));   // slower: a 16th is 7350 samples
     CHECK(stepsOk(L2, 7350.0, 0));
     CHECK(!same(L, L2));
-    // Playing but without a valid position runs on too.
+    // Playing but without a valid position runs on too (from 0, the same place in the bar).
     Transport lost = transport(120.0, 77.7, true);
     lost.valid = false;
     Buf L3(3 * 44100, 1.0f), R3 = L3;
@@ -504,6 +504,61 @@ void shapeStopped() {
     const Followed f = follows(L4, steps, idx("Offbeat"), 4.0);
     CHECK(f.wrong == 0 && f.checked > 300);
     if (f.wrong || f.checked <= 300) std::printf("  stopped and started: %d of %d chunks off the cycle, worst by %g\n", f.wrong, f.checked, f.worst);
+}
+
+// Reset while MPC is stopped, and says where: the lane starts from that song position (as it does when
+// playing) and then runs on at the tempo (plan 1's ruling R21; it used to start from beat 0). Only the first
+// set() after reset() seeds it, and only when MPC's position is valid.
+void shapeSeededStopped() {
+    const P p = with(Shape::kVolume, "Offbeat", 4.0, 1.0f);   // 16 steps a bar, every fourth one open from the third
+    // The gain a step at a time: `step` samples each, the first being step `first` of the bar.
+    auto stepsOk = [](const Buf& out, double step, int first) {
+        bool ok = true;
+        for (int k = 0; (k + 1) * step < static_cast<double>(out.size()); ++k) {
+            const float want = (first + k) % 4 == 2 ? 1.0f : 0.0f;
+            for (size_t i = static_cast<size_t>(k * step) + 100; i < static_cast<size_t>((k + 1) * step) - 100; ++i)
+                if (std::fabs(out[i] - want) > 1e-6f) ok = false;
+        }
+        return ok;
+    };
+    // Stopped at beat 9.5 (step 6 of its bar): the first 16th is open. From 0 it would be shut.
+    Buf L(3 * 44100, 1.0f), R = L;
+    render(p, L, R, transport(120.0, 9.5, false));
+    CHECK(stepsOk(L, k16th, 6));
+    // Slower, and from a step that is not the first of its beat: 5.25 beats is step 21 (90 BPM: 7350 samples a 16th).
+    Buf L2(3 * 44100, 1.0f), R2 = L2;
+    render(p, L2, R2, transport(90.0, 5.25, false));
+    CHECK(stepsOk(L2, 7350.0, 21));
+    CHECK(!stepsOk(L2, 7350.0, 0));
+    // MPC keeps saying 9.5, or says something else later: the position is a seed, not a source. It runs on at the tempo.
+    Buf L3(3 * 44100, 1.0f), R3 = L3;
+    {
+        Shape m;
+        for (size_t pos = 0; pos < L3.size(); pos += kChunk) {
+            m.set(p, transport(120.0, pos < 44100 ? 9.5 : 77.7, false));
+            m.process(&L3[pos], &R3[pos], static_cast<int>(std::min<size_t>(kChunk, L3.size() - pos)));
+        }
+    }
+    CHECK(same(L, L3));
+    // MPC doesn't say where (not valid): from the top, as before.
+    Transport lost = transport(120.0, 9.5, false);
+    lost.valid = false;
+    Buf L4(3 * 44100, 1.0f), R4 = L4;
+    render(p, L4, R4, lost);
+    CHECK(stepsOk(L4, k16th, 0));
+    // Not a number is not a position either.
+    Transport nan = transport(120.0, std::nan(""), false);
+    Buf L5(3 * 44100, 1.0f), R5 = L5;
+    render(p, L5, R5, nan);
+    CHECK(same(L4, L5));
+    // A used Shape, reset, and stopped at 9.5 again: the same as a new one.
+    Shape used;
+    Buf warm(44100, 1.0f), warmR = warm;
+    run(used, p, warm, warmR, transport(120.0, 1.0, true));
+    used.reset();
+    Buf L6(3 * 44100, 1.0f), R6 = L6;
+    run(used, p, L6, R6, transport(120.0, 9.5, false));
+    CHECK(same(L, L6));
 }
 
 // Locates (forwards and back), a stop and a start elsewhere, and short loops: the gain is on the
@@ -833,6 +888,66 @@ void shapeTail() {
     CHECK(n.tailSamples() == 0);
 }
 
+// copyStateFrom() (ruling R48): a Shape that begins while its twin has been running begins as a copy of it: the lanes
+// are where the twin's are, on a stopped transport too, so both move alike from the next sample whatever the audio.
+// What the audio left in the filter is not copied: the copy has no ring where the twin has one.
+void shapeCopyState() {
+    P p;
+    lane(p, Shape::kVolume, "Square", 1.0, 0.8f);
+    lane(p, Shape::kPan, "Triangle", 2.0, 0.5f);
+    lane(p, Shape::kFilter, "Sine", 1.0, 1.0f);
+    p.cutoffHz = 300.0f;
+    p.resonance = 0.9f;
+    p.filterType = Shape::kLP;
+    const size_t cut = 8192 + 96, total = 40000;
+    const Transport t = transport(120.0, 8.0, false);   // stopped: a fresh one starts its grid over
+    const Buf x = whiteNoise(static_cast<int>(total), 0.5f, 5);
+    // Without the filter lane the copy and the twin move in step on other audio: the gains are the same.
+    P gains = p;
+    gains.lane[Shape::kFilter].on = false;
+    Shape a, b, fresh;
+    Buf La = x, Ra = x, Lb(total, 0.5f), Rb = Lb, Lf = Lb, Rf = Lb;
+    for (size_t pos = 0; pos < total; pos += kChunk) {
+        const int n = static_cast<int>(std::min(static_cast<size_t>(kChunk), total - pos));
+        if (pos == cut) b.copyStateFrom(a);
+        a.set(gains, t);
+        a.process(&La[pos], &Ra[pos], n);
+        if (pos >= cut) {
+            b.set(gains, t);
+            b.process(&Lb[pos], &Rb[pos], n);
+            fresh.set(gains, t);
+            fresh.process(&Lf[pos], &Rf[pos], n);
+        }
+    }
+    // (La is the twin on noise, Lb the copy on DC 0.5: compare the gain, the twin's output over its input)
+    double worst = 0.0, apart = 0.0;
+    for (size_t i = cut + 64; i < total; ++i) {
+        if (std::fabs(x[i]) > 0.05f) worst = std::max(worst, static_cast<double>(std::fabs(La[i] / x[i] - Lb[i] / 0.5f)));
+        apart = std::max(apart, static_cast<double>(std::fabs(Lb[i] - Lf[i])));
+    }
+    CHECK(worst < 1e-5);
+    CHECK(apart > 0.1);
+
+    // With the filter: silence in both, and only the twin rings.
+    Shape c, d;
+    Buf Lx = x, Rx = x;
+    for (size_t pos = 0; pos < 16384; pos += kChunk) {
+        c.set(p, t);
+        c.process(&Lx[pos], &Rx[pos], kChunk);
+    }
+    d.copyStateFrom(c);
+    Buf zc(600, 0.0f), zd(600, 0.0f), zcr = zc, zdr = zd;
+    for (size_t pos = 0; pos < 600; pos += kChunk) {
+        const int n = static_cast<int>(std::min<size_t>(kChunk, 600 - pos));
+        c.set(p, t);
+        c.process(&zc[pos], &zcr[pos], n);
+        d.set(p, t);
+        d.process(&zd[pos], &zdr[pos], n);
+    }
+    CHECK(peak(zc) > 1e-3f);    // the twin's filter rings on
+    CHECK(peak(zd) == 0.0f);    // the copy's has nothing in it
+}
+
 } // namespace
 
 void shapeTests() {
@@ -847,6 +962,7 @@ void shapeTests() {
     shapePhase();
     shapeEdges();
     shapeStopped();
+    shapeSeededStopped();
     shapeFollowsJumps();
     shapeTempoChange();
     shapeExtremes();
@@ -855,4 +971,5 @@ void shapeTests() {
     shapeNoClicks();
     shapeReset();
     shapeTail();
+    shapeCopyState();
 }

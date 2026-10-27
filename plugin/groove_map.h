@@ -15,9 +15,11 @@ float paramNorm(int id, float value);    // inverse, for state text, tests and t
 std::string paramDisplay(int id, float norm);   // what the knob's value label shows
 
 // Every parameter as the chain takes it; norm[P_COUNT] are MPC's 0..1 values. A value within a hair of its
-// rest (a depth at 0, a mix at 100%, 0 dB, a straight swing) is its rest exactly, so Init stays the input
-// bit for bit however the knob got there. Any norm is usable: NaN and out-of-range values land on the
-// ends of the range.
+// rest (a depth at 0, a mix at 100%, 0 dB, a straight swing, an Echo at its send of 1 with nothing filtered,
+// driven or modulated) is its rest exactly, so Init stays the input bit for bit however the knob got there.
+// Any norm is usable: NaN and out-of-range values land on the ends of the range. The Echo's four lines are
+// read through one table (groove_map.cpp's kLineIds); the Move parameters are not the chain's (plugin/moves.h
+// plays them) and map to nothing, and Time's pattern is the engine's to set.
 Groove::Params grooveParams(const float* norm);
 
 } // namespace gf

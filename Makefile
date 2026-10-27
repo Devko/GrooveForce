@@ -34,7 +34,7 @@ MV       := third_party/mpc-vst-plugins
 SURF     := surface
 SURF_OUT := $(SURF)/build
 SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveForce
-GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h
+GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h $(SURF_OUT)/time_data.h $(SURF_OUT)/move_data.h
 SKIN     := $(SURF_OUT)/skin.stamp
 
 SRC      := $(wildcard dsp/*.cpp) $(wildcard plugin/*.cpp)
@@ -52,7 +52,7 @@ ARM_SO   := $(BUILD)/arm/grooveforce.so
 ARM_BENCH := $(BUILD)/arm/gfbench
 
 .PHONY: all surface skin preview test test-arm test-arm-pgo test-module test-module-arm bench arm-plugin arm-bench \
-        bench-device rebuild-check \
+        bench-device bench-count rebuild-check \
         plugin-package plugin-install plugin-uninstall clean
 # A recipe that fails leaves no half-written target behind for the next make to trust.
 .DELETE_ON_ERROR:
@@ -117,7 +117,13 @@ M ?=
 MOD_DEPS_shapes := dsp/pump_curves.cpp
 MOD_DEPS_shape := dsp/shapes.cpp dsp/pump_curves.cpp
 MOD_DEPS_pump := dsp/pump_curves.cpp
-MOD_DEPS_groove := dsp/pump.cpp dsp/shape.cpp dsp/shapes.cpp dsp/pump_curves.cpp
+MOD_DEPS_groove := dsp/pump.cpp dsp/shape.cpp dsp/shapes.cpp dsp/pump_curves.cpp dsp/echo.cpp dsp/echo_line.cpp dsp/time.cpp
+MOD_DEPS_echo_mod := dsp/shapes.cpp dsp/pump_curves.cpp
+# Moves play Time patterns (the suite drives dsp/time.cpp from them) and name them from the generated tables.
+MOD_DEPS_moves := plugin/moves.cpp dsp/time.cpp
+MOD_DEPS_echo := dsp/echo_line.cpp dsp/shapes.cpp dsp/pump_curves.cpp
+# The plugin's second suite plays the whole plugin (its first suite has the host's fixtures it uses).
+MOD_DEPS_plugin_moves := $(SRC) test/plugin_test.cpp
 MOD_SRC = test/module_main.cpp test/$(M)_test.cpp $(wildcard dsp/$(M).cpp) $(MOD_DEPS_$(M))
 test-module: $(GEN) | $(BUILD)
 	@[ -n "$(M)" ] || { echo "usage: make test-module M=<module>"; exit 1; }
@@ -138,8 +144,19 @@ $(BUILD)/grooveforce.so: $(SRC) $(HDR) $(GEN) plugin/exports.map | $(BUILD)
 	$(CXX) -std=c++17 -O3 -fno-tree-loop-distribute-patterns -fPIC -fvisibility=hidden -fno-gnu-unique -Wall -Wextra -pthread \
 		$(INC) -shared -Wl,--no-undefined -Wl,--version-script=plugin/exports.map $(SRC) -o $@
 
-$(BUILD)/gfbench: tools/bench.cpp $(HDR) $(GEN) | $(BUILD)
+$(BUILD)/gfbench: tools/bench.cpp tools/cases.h $(HDR) $(GEN) | $(BUILD)
 	$(CXX) -std=c++17 -O2 -Wall -Wextra $(INC) $< -ldl -o $@
+
+# Level-matching (tools/levels.cpp): every factory preset's Output set so the reference mix of its category (the
+# kick for Kick, the bass line alone for Bass, ...: tools/reference_mix.h) comes out as loud as it went in.
+# `levels` reports, `preset-levels` writes the presets' output= lines and regenerates.
+$(BUILD)/gflevels: tools/levels.cpp tools/reference_mix.h plugin/vst2.h | $(BUILD)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra $< -ldl -o $@
+levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
+	$(BUILD)/gflevels $(BUILD)/grooveforce.so presets/Factory
+preset-levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
+	$(BUILD)/gflevels $(BUILD)/grooveforce.so presets/Factory --write
+	python3 $(SURF)/surface.py
 
 # --- device -----------------------------------------------------------------------------------
 # The .so MPC loads: only VSTPluginMain exported (a version script hides the C++ template
@@ -153,7 +170,8 @@ ARM_SO_CMD   = $(ARM_CXX) $(ARM_SO_FLAGS) $(ARM_SO_LINK)
 # Profile-guided: on by default when ARM programs can run here (qemu-arm installed, as test-arm
 # needs, or a native ARM build); PGO=0 builds without. A copy of the plugin compiled with counters
 # is linked into tools/pgo_train.cpp, which plays the reference mix through it (every part, every choice,
-# every preset); then the .so is compiled from the same sources with the same flags plus that profile.
+# every knob moved, the transport stopped, located and at every tempo, every Move, every preset); then
+# the .so is compiled from the same sources with the same flags plus that profile.
 # -fprofile-partial-training keeps functions the trainer never ran optimised as usual. Objects keep one
 # path (dir_name.o) in both rounds: GCC names the profile files after it. A missing profile fails the
 # build instead of quietly building without. (SubForce's.)
@@ -173,7 +191,7 @@ $(ARM_SO_STAMP): rebuild-check
 rebuild-check:
 
 arm-plugin: $(ARM_SO)
-$(ARM_SO): $(SRC) $(HDR) $(GEN) tools/pgo_train.cpp tools/reference_mix.h plugin/exports.map $(ARM_SO_STAMP)
+$(ARM_SO): $(SRC) $(HDR) $(GEN) tools/pgo_train.cpp tools/cases.h tools/reference_mix.h plugin/exports.map $(ARM_SO_STAMP)
 	mkdir -p $(BUILD)/arm
 ifeq ($(PGO_ON),1)
 	rm -rf $(PGO_DIR) && mkdir -p $(PGO_OBJ) $(PGO_PROF)
@@ -207,7 +225,7 @@ else
 endif
 
 arm-bench: $(ARM_BENCH)
-$(ARM_BENCH): tools/bench.cpp $(HDR) $(GEN)
+$(ARM_BENCH): tools/bench.cpp tools/cases.h $(HDR) $(GEN)
 	mkdir -p $(BUILD)/arm
 	$(ARM_CXX) -std=c++17 $(ARM_OPT) -Wall -Wextra -Wno-psabi $(INC) $< -ldl -o $@
 
@@ -219,6 +237,35 @@ bench-device: $(ARM_SO) $(ARM_BENCH)
 	scp -q $(SSH_OPTS) $(ARM_SO) $(ARM_BENCH) $(FORCE):/tmp/
 	$(SSH) $(FORCE) 'r=0; /tmp/gfbench /tmp/grooveforce.so $(BENCH_ARGS) -c 1 || r=1; \
 		rm -f /tmp/gfbench /tmp/grooveforce.so; exit $$r'
+
+# Exact ARM instructions per processReplacing call, without the Force (docs/PERFORMANCE.md "Instruction
+# counts"; EffectForce's bench-count): the bench with its markers (-m) runs the plain .so (no profile;
+# unstripped, -g, so a profile's addresses have names and lines) under a qemu-arm built with plugins, and
+# tools/gfcount.c counts every instruction between the marks. Prints every case's thousands of instructions
+# per block and its output's hashes; the whole log, with the bench's memory map, is build/arm/count/log.txt.
+#   make bench-count [CASES=5,8] [PROF=<file>]
+# QEMU_PLUGINS: that qemu-arm; QEMU_PLUGIN_INCLUDE: the folder with its qemu-plugin.h (the 8.2 API).
+QEMU_PLUGINS        ?= $(HOME)/qemu-icount/qemu-arm-plugins
+QEMU_PLUGIN_INCLUDE ?= $(HOME)/qemu-icount-src/qemu-8.2.2+ds/include/qemu
+COUNT_ARGS ?= -s 2
+CASES      ?=
+PROF       ?=
+COUNT_DIR  := $(BUILD)/arm/count
+COUNT_SO   := $(COUNT_DIR)/grooveforce.so
+GFCOUNT    := $(BUILD)/libgfcount.so
+comma      := ,
+bench-count: $(COUNT_SO) $(ARM_BENCH) $(GFCOUNT)
+	@[ -x "$(QEMU_PLUGINS)" ] || { echo "no qemu-arm with plugins at QEMU_PLUGINS=$(QEMU_PLUGINS) (set it in local.mk)"; exit 1; }
+	GF_CASES=$(CASES) $(QEMU_PLUGINS) -L /usr/arm-linux-gnueabihf -plugin $(abspath $(GFCOUNT))$(if $(PROF),$(comma)prof=$(abspath $(PROF))) \
+		-d plugin $(ARM_BENCH) $(COUNT_SO) -m $(COUNT_ARGS) -c -1 > $(COUNT_DIR)/log.txt 2>&1 || { cat $(COUNT_DIR)/log.txt; exit 1; }
+	@grep -Ev '^(BASE|MAP) ' $(COUNT_DIR)/log.txt
+
+$(COUNT_SO): $(SRC) $(HDR) $(GEN) plugin/exports.map $(ARM_SO_STAMP)
+	mkdir -p $(COUNT_DIR)
+	$(ARM_SO_CMD) -g $(SRC) -o $@
+
+$(GFCOUNT): tools/gfcount.c | $(BUILD)
+	gcc -O2 -Wall -Wextra -shared -fPIC $$(pkg-config --cflags glib-2.0) -I$(QEMU_PLUGIN_INCLUDE) $< -o $@
 
 # Release zip: plugin + skin + sd88me's installer (stops MPC, backs up and edits MPC.settings,
 # restarts MPC). The plugin-list entry says Effect with 2 inputs: MPC lists it under insert effects.

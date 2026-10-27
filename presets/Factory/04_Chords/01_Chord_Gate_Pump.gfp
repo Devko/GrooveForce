@@ -1,8 +1,15 @@
 grooveforce 1
+pump_on=On
+pump_rate=1/4
+pump_curve=Smooth
+pump_depth=0.5
+pump_length=0.6
+pump_trigger=Grid
+pump_target=All
 shape_on=On
+shape_target=All
 vol_on=On
 vol_shape=Trance 1
 vol_rate=1 bar
 vol_depth=1
-pump_on=On
-pump_depth=0.5
+output=2.5

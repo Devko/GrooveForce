@@ -118,6 +118,7 @@ bool loadState(Surface& s, const std::string& textIn, bool asPreset) {
         }
         if (!asPreset) s.setPresetKey(preset);   // a project without one came from no preset
     }
+    s.noteLoad();   // once the sound is complete: the Move that plays ends, and the Move the state selected is only selected
     s.refresh();
     return true;
 }

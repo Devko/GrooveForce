@@ -9,7 +9,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
@@ -147,5 +150,85 @@ struct Turn {
     Turn& operator=(const Turn&) = delete;
     long long was;
 };
+
+
+// --- what the plugin suites share (test/plugin_test.cpp, test/plugin_moves_test.cpp) ------------------------------------
+
+// Their fixtures: the folders for presets and data, and the surface's clock. Made again by each suite, removed by each.
+void setupPluginTests();
+void cleanupPluginTests();
+
+// GF_TEST_ONLY=name,name runs just the tests of a suite named (exactly), a development help; unset or empty: all.
+inline bool testWanted(const char* name) {
+    const char* only = std::getenv("GF_TEST_ONLY");
+    if (!only || !*only) return true;
+    return (std::string(",") + only + ",").find(std::string(",") + name + ",") != std::string::npos;
+}
+#define GF_RUN(f)                         \
+    do {                                  \
+        if (eft::testWanted(#f)) f();     \
+    } while (0)
+
+inline constexpr float kCeiling = 7.9433f;   // +18 dBFS: the most that ever leaves the plugin
+
+inline bool starts(const std::string& s, const char* with) { return s.compare(0, std::strlen(with), with) == 0; }
+inline bool has(const std::string& s, const std::string& part) { return s.find(part) != std::string::npos; }
+
+// A small deterministic generator (0..1), so a failure reproduces.
+struct Rng {
+    uint32_t seed;
+    explicit Rng(uint32_t s) : seed(s) {}
+    float next() {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<float>(seed >> 8) / 16777216.0f;
+    }
+    int below(int n) { return std::min(static_cast<int>(next() * static_cast<float>(n)), n - 1); }
+};
+
+// The sound parameters of two instances alike (a state is written with six digits).
+inline bool sameSound(Host& a, Host& b) {
+    bool same = true;
+    for (int i = 0; i < gf::P_COUNT; ++i)
+        if (gf::PARAM_INFO[i].kind == gf::Kind::Synth && std::fabs(a.get(i) - b.get(i)) > 2e-5f) {
+            std::printf("  differs: %s %.6f / %.6f\n", gf::PARAM_INFO[i].key, static_cast<double>(a.get(i)), static_cast<double>(b.get(i)));
+            same = false;
+        }
+    return same;
+}
+
+// The user presets of earlier tests gone, so "User 001" is the first save of this one.
+inline void freshUserPresets() {
+    std::error_code ec;
+    std::filesystem::remove_all(fixtureDir() + "/presets/User", ec);
+}
+
+inline constexpr int kBeat = 22050;   // a quarter note at 120 BPM, in samples
+inline constexpr float kDuck = 0.005f;   // a duck is the output under this, a hundredth of the 0.5 the tests feed
+// The steepest step of that 0.5 when its gain moves a full scale in a millisecond (and 10% more).
+inline constexpr float kSlope = 0.5f / 44.1f * 1.1f;
+
+// Where the output goes under `below`: the first sample of each duck.
+inline std::vector<int> ducks(const Buf& x, float below) {
+    std::vector<int> at;
+    for (size_t i = 0; i < x.size(); ++i)
+        if (x[i] < below && (i == 0 || x[i - 1] >= below)) at.push_back(static_cast<int>(i));
+    return at;
+}
+
+// The Pump as the tests use it: Hard, 1/4, the depth given, MPC playing at 120 BPM.
+inline void pumpOn(Host& h, float depth) {
+    h.on(gf::P_PUMP_ON);
+    h.option(gf::P_PUMP_CURVE, "Hard");
+    h.option(gf::P_PUMP_RATE, "1/4");
+    h.set(gf::P_PUMP_DEPTH, depth);
+    h.play(true);
+}
+
+// "1 OF 4 ON": the parts the status line says are running (-1: it doesn't say).
+inline int partsOn(Host& h) {
+    const std::string s = h.display(gf::P_STATUS);
+    const size_t at = s.find(" OF 4 ON");
+    return at != std::string::npos && at > 0 && s[at - 1] >= '0' && s[at - 1] <= '9' ? s[at - 1] - '0' : -1;
+}
 
 } // namespace eft

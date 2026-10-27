@@ -1,0 +1,17 @@
+grooveforce 1
+pump_on=On
+pump_rate=1/4
+pump_curve=Hard
+pump_depth=0.8
+pump_length=0.4
+pump_trigger=Grid
+pump_target=All
+echo_on=On
+a_on=On
+a_level=0.8
+a_div=1/8.
+a_fb=0.55
+a_mode=Mono
+a_ftype=LP
+a_cut=900
+output=0.2

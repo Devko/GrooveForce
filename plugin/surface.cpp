@@ -69,6 +69,13 @@ const int kItemTiles[] = {
 static_assert(sizeof kCatTiles / sizeof kCatTiles[0] == kBrowserCats, "category tiles");
 static_assert(sizeof kItemTiles / sizeof kItemTiles[0] == kBrowserItems, "item tiles");
 
+constexpr int kMoveTiles = 16;                 // the MOVES page's tiles, one per Move, in the Move parameter's order after None
+constexpr long long kTileEchoMs = 1000;        // MPC's release echo comes within this of a tile's tap
+static_assert(P_MOVE_16 - P_MOVE_1 == kMoveTiles - 1, "the Move tiles are consecutive");
+
+// The Move a tile belongs to (0..15), else -1.
+int moveOfTile(int param) { return param >= P_MOVE_1 && param <= P_MOVE_16 ? param - P_MOVE_1 : -1; }
+
 std::string upper(std::string s) {
     for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return s;
@@ -158,6 +165,8 @@ void Surface::apply(int i, float n) {
                 const int cur = static_cast<int>(std::lround(want_[i].load() * steps));
                 const int pick = stepIndex(i, n, steps, cur);
                 put(i, static_cast<float>(pick) / static_cast<float>(steps));
+                // The Move parameter holds the selected Move: a change of it is a Move to fire at the quantize, None one to stop.
+                if (i == P_MOVE && pick != cur) postMove(pick == 0 ? MoveCall::kStop : MoveCall::kFire, std::max(pick - 1, 0));
                 if (exactOption(n, steps)) {   // a tap on a list row closes its popup (a Q-Link nudge doesn't)
                     const int flag = popupFlagOf(i);
                     if (flag >= 0) put(flag, 0.0f);
@@ -188,10 +197,18 @@ void Surface::apply(int i, float n) {
             }
             if (i == P_PRE_INIT) loadPreset(kInitKey);
             if (i == P_PRE_SAVE) savePreset();
+            if (i == P_MOVE_GO) {   // the selected Move, again: the call carries it (None selected: no call)
+                const int selected = static_cast<int>(std::lround(want_[P_MOVE].load() * static_cast<float>(PARAM_INFO[P_MOVE].nopts - 1))) - 1;
+                if (selected >= 0) postMove(MoveCall::kGo, selected);
+            }
             if (i == P_CAT_PREV || i == P_CAT_NEXT || i == P_ITEM_PREV || i == P_ITEM_NEXT || i == P_RND) browserAction(i);
             break;
         case Kind::Tile:
         case Kind::Toggle: {
+            if (const int move = moveOfTile(i); move >= 0) {
+                tapMoveTile(i, move, n > 0.5f);
+                break;
+            }
             const bool on = n > 0.5f;
             const bool lit = want_[i].load() > 0.5f;
             if (on == lit || toggleBounce(i, on)) break;   // nothing new, or the release echo
@@ -200,6 +217,57 @@ void Surface::apply(int i, float n) {
         }
         case Kind::Readout: break;
     }
+}
+
+// --- the Moves ----------------------------------------------------------------------------
+
+// A load ends whatever was waiting to be fired or stopped, and is a flag the audio thread cannot miss; the others replace
+// each other (the latest is the state the Moves are to be in).
+void Surface::postMove(int kind, int move) {
+    if (kind == MoveCall::kLoad) {
+        moveCall_.store(0, std::memory_order_relaxed);
+        moveLoad_.store(true, std::memory_order_release);
+        return;
+    }
+    moveCall_.store(static_cast<uint32_t>(kind + 1) << 4 | static_cast<uint32_t>(move & 15), std::memory_order_release);
+}
+
+// A tap on Move `move`'s tile selects the Move and fires it. A tap flips what MPC read back, and the tile reads back lit
+// while its Move plays or waits: a tap on a dark tile sends 1 and a tap on a lit one (the Move again) sends 0, and a value
+// that is the tile's own is nothing new (MPC setting its tiles to what it has, say). What follows a tap within a second,
+// whichever way, is its release echo.
+void Surface::tapMoveTile(int param, int move, bool on) {
+    if (on == (want_[param].load(std::memory_order_relaxed) > 0.5f)) return;
+    const long long now = nowMs();
+    if (toggleMs_[param] > 0 && now - toggleMs_[param] < kTileEchoMs) return;
+    toggleMs_[param] = now;
+    put(P_MOVE, static_cast<float>(move + 1) / static_cast<float>(PARAM_INFO[P_MOVE].nopts - 1));
+    postMove(MoveCall::kFire, move);
+}
+
+bool Surface::takeMoveCall(MoveCall& out) {
+    if (moveLoad_.exchange(false, std::memory_order_acquire)) {   // first: it ends what came before it
+        out.kind = MoveCall::kLoad;
+        out.move = 0;
+        return true;
+    }
+    const uint32_t word = moveCall_.exchange(0, std::memory_order_acquire);
+    if (word == 0) return false;
+    out.kind = static_cast<int>(word >> 4) - 1;
+    out.move = static_cast<int>(word & 15u);
+    return true;
+}
+
+void Surface::dropMoveCalls() {
+    moveLoad_.store(false, std::memory_order_relaxed);
+    moveCall_.store(0, std::memory_order_relaxed);
+}
+
+void Surface::moveLit(uint32_t mask) {
+    if (mask == litMoves_) return;
+    for (int k = 0; k < kMoveTiles; ++k)
+        if (((mask ^ litMoves_) >> k & 1u) != 0u) put(P_MOVE_1 + k, (mask >> k & 1u) != 0u ? 1.0f : 0.0f);
+    litMoves_ = mask;
 }
 
 int Surface::stepIndex(int i, float n, int count, int cur) {
@@ -452,6 +520,8 @@ void Surface::refresh() {
     std::snprintf(b, sizeof b, "PAGE %d / %d", itemPage_ + 1, itemPages);
     t[P_ITEM_PAGE] = b;
     t[P_BR_NOW] = t[P_PRESET];
+    for (int k = 0; k < kMoveTiles; ++k)   // the Move tiles' names (the Move parameter's options after None); their lit state is the audio thread's
+        t[static_cast<size_t>(P_MOVE_1 + k)] = PARAM_INFO[P_MOVE].opts[k + 1];
     put(P_FAV, !key.empty() && lib.isFavorite(key) ? 1.0f : 0.0f);
 
     size_t h = 0;
