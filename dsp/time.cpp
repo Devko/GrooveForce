@@ -404,7 +404,7 @@ void TimeCore::headsLookup(bool inPattern, double x, double lag, Heads& h) {
     // nothing special at this sample (no jump too close to be scheduled, no lap rounding), up to where the segment, the
     // piece, the lap or the state of the fade changes (a hair short of it: the edge itself is looked up).
     run_.lo = run_.hi = 0.0;
-    if (plain && volRun && !h.cut && src_.isLine() && vol_.isLine()) {
+    if (runs_ && plain && volRun && !h.cut && src_.isLine() && vol_.isLine()) {
         double hiXl = std::min({src_.segEnd(), vol_.segEnd() - leadB_, len_ - leadB_, fade != 0 ? line : line - tfb_});
         hiXl -= 1e-9;
         if (hiXl > xl) {

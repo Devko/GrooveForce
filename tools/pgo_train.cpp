@@ -248,6 +248,10 @@ int presets(AEffect* e) {
         if (now == at) break;
         at = now;
     }
+    if (at != 0.0f) {   // PREV did not reach the first preset: counting from here would pass for a walk of the whole library
+        std::fprintf(stderr, "pgo_train: the preset walk stopped at %.4f, not on the first preset\n", static_cast<double>(at));
+        std::exit(1);
+    }
     play(e, kPresetSeconds);
     int played = 1;
     for (int n = 0; n < kMaxPresets; ++n) {

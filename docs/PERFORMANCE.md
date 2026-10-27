@@ -119,7 +119,8 @@ instructions with their lines). The four instances' count is the sum of the four
 
 EffectForce's rule of thumb is about 36k-44k instructions to a point of the block on the Force. Plan 1's
 device run bears it out for the p99 (Pump 44.8k for 1.08, Shape 40.3k for 1.15, both 73.8k for 1.93: 35k-42k
-to a point; the device average runs 49k-57k a point). The counts miss what the device adds (cache misses, VFP
+to a point; the device average runs 49k-57k a point). That sets today's counts, plan 2's build (case 0, the
+plugin's own 11.8k, now has plan 2's engine in it), against plan 1's device times. The counts miss what the device adds (cache misses, VFP
 divisions and flag transfers that stall), which the device's p99 over its average shows.
 
 2026-10-26, thousands of instructions per block (GCC 13, the device flags, 2 s a case):
@@ -159,12 +160,13 @@ double division, tens of cycles on the device and one instruction in the count),
 the four ring taps with 64-bit indices (a 64-bit conversion is a library call on ARM), and two scalar Hermite
 reads. Now:
 
-- a curve keeps the numbers of the segment its cursor stands on (the reciprocal of its width, its slope, the
-  Jump it heads for), so a call divides nothing;
+- a curve keeps the numbers of the segment its cursor stands on (its ends, its slope, the Jump it heads for), so
+  a call on a straight segment divides nothing (a Smooth segment, none in the library today, still divides and
+  takes a cosine or a sine per call);
 - a **run**: the first sample of a stretch (one segment of the source, one straight piece of the volume, up to
   the next line's fade or inside it) looks everything up and leaves the formulas; the samples after it only
   evaluate them, with the same arithmetic, so a sample has the same answer by either way (tested: bit for bit);
-- the crossfade's weight is a table of 4096 steps with linear interpolation, within 1e-7 of the raised cosine;
+- the crossfade's weight is a table of 4096 steps with linear interpolation, within 1.2e-7 of the raised cosine;
 - the ring is indexed in 32 bits, the sample numbers go through doubles, the Hermite of both channels is one NEON
   vector, and the reads inline.
 
@@ -174,13 +176,17 @@ reads. Now:
 | 8 Time in fades: Stutter 1/16 | 107.0 / 146.5 / 147.4 | 41.8 / 59.2 / 66.9 |
 | 9 Everything heaviest | 457.4 / 497.2 / 499.2 | 397.8 / 415.9 / 423.7 |
 
-The output moved by float rounding, no more: against the old engine, over 18M frames of all 15 patterns at 128
+The output moved by float rounding, no more. Against the old engine, over 18M frames of all 15 patterns at 128
 and 300 BPM, in chunks of 32, with a lag, a tempo change and a locate under the pattern, the largest difference
-is 7.5e-8 (1.3e-7 on x86), about one float step at 0.7, and the rms difference 7e-10 on a signal of 0.12 (-165
-dB). test/time_test.cpp keeps the parts of that proof that can be kept: the weights table against the cosine
-(under 1.2e-7), the curves' numbers against dividing at every call (under 1e-12, for every pattern, going
-forward and jumping about), and a pattern played with a run against the same with the pattern bound again before
-every sample, so that no run is left (identical).
+was 7.5e-8 on ARM (1.3e-7 on x86), the rms difference 7e-10 on a signal of 0.12 (-165 dB); the review's wider
+set (5,850 scenarios: one-shot and going round, 83-999 BPM, grooves, tempo steps and ramps, locates, MPC loops,
+re-fires, pattern switches, resets, chunks of 1 to 128) found at most 2.1e-7 (about two float steps at 0.7) on x86
+and 1.8e-7 on ARM, nothing over 1e-6. test/time_test.cpp keeps the parts of that proof that can be kept: the
+weights table against the cosine (under 1.2e-7), the curves' numbers against dividing at every call (under 1e-12,
+for every pattern, going forward and jumping about), and every pattern, one-shot and going round, played with
+runs and with runs off (`useRuns(false)`) through chunks of 1, 7, 31, 32 and 128, a tempo step and a ramp, a
+locate, a re-fire, another pattern at the same start and a reset: identical, bit for bit. Without the run's
+two resets (the tempo's, the pattern's) 14 and 26 of its 30 cases fail.
 
 ## What keeps it cheap
 

@@ -288,28 +288,60 @@ void timeCurveNumbers() {
 }
 
 // What a sample finds in the run an earlier sample left (the formulas of its segment, ready) is what it would have found by looking it
-// up: sample for sample, bit for bit. Binding the pattern again before every sample leaves no run to find.
+// up: sample for sample, bit for bit. A run is left standing across chunks, and put away when the pattern is bound again or the tempo
+// changes (a locate, a re-fire or a lap ends it by x), so the script below does everything that could leave a stale one: chunks of
+// every size, a tempo step up and a ramp down, a locate, a re-fire, another pattern at the same start, a reset. It is played twice, with
+// runs and (useRuns(false)) without: no run, whatever else would have put one away.
+Buf playScript(const Buf& in, int p, bool loop, double baseBpm, bool runs) {
+    Time time;
+    CHECK(time.allocate());
+    time.useRuns(runs);
+    Buf L = in, R = in;
+    Time::Params q;
+    q.groove = p % 3 == 0 ? Time::kDrunk : Time::kOff;   // a groove under some of them: the pattern holds the playhead, the groove has the rest
+    q.amount = 0.7f;
+    q.pattern = p;
+    q.patternStart = 1.0;
+    q.loop = loop;
+    static const size_t sizes[] = {32, 7, 31, 32, 128, 1, 32, 32};
+    double bpm = baseBpm, beats = 0.0;
+    bool done[5] = {};
+    size_t k = 0;
+    for (size_t i = 0; i < in.size(); ++k) {
+        const size_t m = std::min(sizes[k % 8], in.size() - i);
+        const double f = static_cast<double>(i) / static_cast<double>(in.size());
+        if (!done[0] && f >= 0.25) done[0] = true, bpm = baseBpm * 1.3;                                   // a tempo step, up
+        if (f >= 0.40 && f < 0.55) bpm = baseBpm * (1.3 - 0.5 * (f - 0.40) / 0.15);                      // a ramp down
+        if (!done[1] && f >= 0.55) done[1] = true, bpm = baseBpm, beats += 0.37;                          // a locate forward, at the tempo again
+        if (!done[2] && f >= 0.65) done[2] = true, q.patternStart = std::ceil(beats * 4.0) / 4.0;         // the Move fired again, on the next 1/16
+        if (!done[3] && f >= 0.75) done[3] = true, q.pattern = (p + 5) % gf::numTimePatterns();           // another pattern, the same start
+        if (!done[4] && f >= 0.85) done[4] = true, time.reset();                                          // a long suspend
+        Transport t;
+        t.bpm = bpm;
+        t.beats = beats;
+        t.playing = t.valid = true;
+        time.set(q, t);
+        time.process(&L[i], &R[i], static_cast<int>(m));
+        beats += static_cast<double>(m) * bpm / 60.0 / kRate;
+        i += m;
+    }
+    CHECK(same(L, R));
+    return L;
+}
+
 void timeRuns() {
-    for (const char* name : {"Roll Build 1 Bar", "Stutter 1/16", "Reverse Beat", "Gate 1/16", "Tape Stop", "Spin-Back"})
-        for (const double bpm : {120.0, 174.0}) {
-            const int p = idx(name);
-            const double spb = kRate * 60.0 / bpm;
-            const Buf in = mixture(static_cast<int>(1.6 * spb));
-            const auto render1 = [&](bool lookEach) {
-                TimeCore c;
-                CHECK(c.allocate());
-                Buf L = in, R = in;
-                for (size_t i = 0; i < in.size(); ++i) {
-                    if (lookEach) c.useLibrary(gf::kTimePatterns, gf::kNumTimePatterns, gf::kTimePoints);
-                    Transport t;
-                    t.bpm = bpm;
-                    t.beats = static_cast<double>(i) / spb;
-                    t.playing = t.valid = true;
-                    c.process(&L[i], &R[i], 1, t, p, 0.5, 0.0);
-                }
-                return L;
-            };
-            CHECK(same(render1(false), render1(true)));
+    for (int p = 0; p < gf::numTimePatterns(); ++p)
+        for (const bool loop : {false, true}) {
+            const double len = gf::timePatternDef(p).lengthBeats;
+            const double bpm = 600.0;   // fast, for the long patterns: two laps of the longest is 32 beats
+            const double beats = loop ? 1.0 + 2.3 * len + 0.5 : 1.0 + 1.2 * len + 1.0;
+            const Buf in = whiteNoise(static_cast<int>(beats * kRate * 60.0 / bpm), 0.5f, 3u + static_cast<uint32_t>(p));
+            const Buf withRuns = playScript(in, p, loop, bpm, true);
+            const Buf without = playScript(in, p, loop, bpm, false);
+            const bool alike = same(withRuns, without);
+            if (!alike) std::printf("  %s%s: runs and lookups differ\n", gf::timePatternName(p), loop ? " going round" : "");
+            CHECK(alike);
+            CHECK(!same(withRuns, in));   // the script plays something
         }
 }
 

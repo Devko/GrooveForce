@@ -97,7 +97,7 @@ float timeVolumeAt(int pattern, double x);
 double timeNextJump(int pattern, double x0, double x1);
 
 // The weight of a crossfade's incoming side when `remaining` (0..1, clamped) of it is still to go: 0.5 + 0.5 cos(pi r), 1 at 0
-// (done) and 0 at 1 (about to begin). From a table with linear steps, within 1e-7 of the cosine (a float's own rounding is 6e-8 at 1):
+// (done) and 0 at 1 (about to begin). From a table with linear steps, within 1.2e-7 of the cosine (a float's own rounding is 6e-8 at 1):
 // the playhead asks for it every sample of a fade, and a cosine of a double is a hundred instructions and a libm call.
 float timeFadeWeight(double remaining);
 
@@ -181,6 +181,14 @@ public:
     // this is how the engine is tried on curves the library would not let through.
     void useLibrary(const TimePatternDef* defs, int count, const TPoint* points);
 
+    // Runs (see Stretch below) on or off: off, every sample looks its curves up. A test's seam: the two must sound the same, bit
+    // for bit, whatever is done to the engine meanwhile (a tempo, a locate, another pattern), and only with them off, whatever
+    // else resets a run, can that be told. Any time.
+    void useRuns(bool on) {
+        runs_ = on;
+        run_.lo = run_.hi = 0.0;
+    }
+
 private:
     struct Store {
         std::vector<float> ring;   // kRingFrames interleaved L R frames
@@ -247,6 +255,7 @@ private:
     double tfb_ = 0.0, leadB_ = 0.0, bps_ = 0.0;   // the crossfade and the volume's look-ahead, and a sample, in beats at this chunk's tempo
     double invTfb_ = 0.0;                          // 1 / tfb_
     Stretch run_;
+    bool runs_ = true;   // useRuns()
 
     // What the last chunk ended on, to tell a chunk that follows on from one that does not.
     bool fresh_ = true;
@@ -344,6 +353,9 @@ public:
 
     // Where the next chunk starts on the clock a pattern's start is measured on while the transport is stopped.
     double nextBeat() const { return pos_; }
+
+    // TimeCore::useRuns(), for the tests.
+    void useRuns(bool on) { core_.useRuns(on); }
 
 private:
     // One piece of a chunk: what TimeCore is asked for the next `m` samples.
