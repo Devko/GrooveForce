@@ -319,12 +319,12 @@ drive in the loop the repeats wear down slowly.
 | **Ring** | the send and D's output (see below) | A's output | B's output | C's output |
 | **Spread** | the send | A's output | A's output | A's output |
 
-Every line that is on is heard at its Level and Pan, whatever the routing. A line that is off gives
-the routing nothing. In Serial, Pairs and Spread the line it feeds hears nothing: every line after it
-in Serial, B if A is off and D if C is off in Pairs, and B, C and D if A is off in Spread. So start a
-chain with a line that is on. A **Ring** goes round the lines that are on instead: the send goes to
-the first line that is on (B, if A is off), and each line hears the line that is on before it. A
-routing change crossfades in about 1 ms.
+Every line that is on is heard at its Level and Pan, whatever the routing. Every routing closes over
+the lines that are on: a line whose source is off takes what that source would have taken. So a
+**Serial** chain skips a line that is off (with B off, C hears A), in **Pairs** B takes the send when
+A is off (and D when C is off), in **Spread** B, C and D take the send when A is off, and a **Ring**
+goes round the lines that are on, the send going to the first of them (B, if A is off). Any line you
+switch on is heard. Switching a line or the routing crossfades in about 1 ms.
 
 In **Parallel**, **Serial**, **Pairs** and **Spread** every line keeps its own feedback: a line of
 repeats. **Ring** is the one routing that goes round, and there the feedback means something else: a
@@ -674,9 +674,8 @@ the echoes ring on through it.
 - **Resonant filters in the loop.** The repeats keep the filter's resonant tone, but the loop never
   gains: feedback 100% holds the repeats and never makes them grow. What you hear can still be louder
   than what went in. The output is held to +18 dBFS.
-- **The Ring's feedback means "round the ring".** See [Echo](#echo). With a line off, the line it
-  feeds in Serial, Pairs and Spread hears nothing; a Ring goes round the lines that are on, and
-  hands the send to the first of them.
+- **The Ring's feedback means "round the ring".** See [Echo](#echo). Every routing closes over the
+  lines that are on: a line whose source is off takes what that source would have taken.
 - **Time never plays the future.** A trick that seems to need it plays what was recorded.
 - **Moves are the factory 16.** You can pick and save the selected Move, the mode and the quantize in a
   preset, but not edit a Move or re-order the tiles. There is no Hold mode (a Move while the tile is

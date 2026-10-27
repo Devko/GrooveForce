@@ -4,6 +4,14 @@ Releases are built by CI from a `vX.Y.Z` tag ([`.github/workflows/build.yml`](.g
 the section for the tag's version becomes the release's notes. While the version is 0.x the parameter
 list may still change between releases.
 
+## 0.0.2
+
+- **Echo: every routing closes over the lines that are on**, as the Ring already did. A line whose
+  source is off takes what that source would have taken: in **Pairs** B takes the send when A is off
+  (and D when C is off), a **Serial** chain skips a line that is off (with B off, C hears A), and in
+  **Spread** B, C and D take the send when A is off. In 0.0.1 a line switched on could stay silent,
+  so that in Pairs only some lines seemed to work. Switching still crossfades in about 1 ms.
+
 ## 0.0.1
 
 The first version, a preview: four parts, **Pump**, **Shape**, **Echo** and **Time**, 16 one-tap

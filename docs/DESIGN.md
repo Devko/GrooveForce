@@ -503,8 +503,11 @@ what was decided. Each says what the design text above no longer says.
   without loss.
 - **R44, Freeze holds in every routing.** Frozen, the feeds between lines stop in Serial, Pairs and
   Spread, as the send does; in a Ring the feedbacks go to 1.
-- A line that is off gives a routing nothing: with A off, Serial, Pairs and Spread pass nothing down
-  from it, while a Ring closes over the lines that are on and hands the send to the first of them.
+- **R63 (0.0.2), every routing closes over the lines that are on**, as R46 made the Ring: a line whose
+  source is off takes what that source would have taken (Serial skips it; in Pairs B takes the send
+  when A is off, D when C is; in Spread B, C and D take it when A is). 0.0.1 passed nothing down from a
+  line that was off, so a line switched on could stay silent (the user, on the Force: "in pairs only C
+  works").
 - **R40, a routing change** crosses over 45 samples (1 ms), not one 32-sample chunk: the 1 ms rule for
   gain edges wins.
 - **R41, one detector.** The Echo runs one onset detector and one level follower on the key for all

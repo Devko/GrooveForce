@@ -18,8 +18,9 @@
 // What a routing passes from one line to another is the source line's read times the line's loopScale()
 // (R36: 1 / its filter's peak gain when that is over 1, a resonant low-pass or high-pass In loop), so a
 // resonance never raises what is passed on. What is heard is not scaled: each line that is on is heard at
-// its Level and Pan whatever the routing. A line that is off is neither read nor written, and gives a
-// routing nothing (a Serial chain with B off passes nothing to C and D; a Ring closes over the others). A routing change crosses the
+// its Level and Pan whatever the routing. A line that is off is neither read nor written, and every
+// routing closes over the lines that are on (R63): a line whose source is off takes what that source would have taken (a Serial
+// chain with B off feeds C from A; in Pairs B takes the send when A is off; a Ring goes round the others). A routing change crosses the
 // lines' inputs over time: the design says one chunk (32 samples, 0.73 ms), but a chunk is faster than
 // the plugin's rule that no gain edge is faster than 1 ms, so it takes a hair over 1 ms (45 samples,
 // ruling R40) and ends in the next chunk. The crossfade moves each of the five coefficients a line's
@@ -66,8 +67,8 @@
 // falls at its own rate, and the detector's sensitivity is the Echo's.
 //
 // The Echo's controls:
-//   send          the input into the lines, 0..1 (a gain, slewed). Only the first line of a routing hears it
-//                 (in a Ring the first that is on), or all four in Parallel, or A and C in Pairs.
+//   send          the input into the lines, 0..1 (a gain, slewed). Only the first line of a routing that is on
+//                 hears it, or all four in Parallel, or the first of each pair in Pairs (R63).
 //   duck          the wet ducks under the KEY with EffectForce's law: the key's louder side (up to +18 dBFS)
 //                 through a 5 ms attack, 250 ms release envelope, gain 1 / (1 + 16 duck env): at duck 1,
 //                 -6 dB with the key at -24 dBFS, -19 dB at -6 dBFS. Only the heard wet ducks, not the lines,

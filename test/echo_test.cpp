@@ -259,11 +259,20 @@ void echoSerial() {      // A <- x, B <- yA: B's first repeat comes at A + B, an
     const size_t a = at + 13230, b = a + 19845, c = b + 6615, d = c + 26460;
     CHECK(near(v.l[a], kH0, 0.01) && near(v.l[b], std::pow(kH0, 2), 0.01) && near(v.l[c], std::pow(kH0, 3), 0.01) && near(v.l[d], std::pow(kH0, 4), 0.01));
     CHECK(quietExcept(v.l, {a, b, c, d}, 2000) < 0.003f);
-    // A line that is off breaks the chain: B off, so C and D hear nothing (A is still heard).
+    // The chain closes over the lines that are on (R63): B off, so C takes A's repeat and D C's.
     q.line[1].on = false;
     Rig g;
     const Wet u = run(g, q, impulseAt(n + 40000, at));
-    CHECK(near(u.l[a], kH0, 0.01) && quietExcept(u.l, {a}, 2000) < 0.003f);
+    const size_t c2 = a + 6615, d2 = c2 + 26460;
+    CHECK(near(u.l[a], kH0, 0.01) && near(u.l[c2], kH0 * kH0, 0.01) && near(u.l[d2], std::pow(kH0, 3), 0.01));
+    CHECK(quietExcept(u.l, {a, c2, d2}, 2000) < 0.003f && g.running() == 3);
+    // A off: B is the first line that is on, so it takes the send.
+    P r;
+    on(r, 1, k316);
+    r.routing = Echo::kSerial;
+    Rig h;
+    const Wet t = run(h, r, impulseAt(n, at));
+    CHECK(near(t.l[at + 19845], kH0, 0.01) && quietExcept(t.l, {at + 19845}, 2000) < 0.003f);
 }
 
 void echoPairs() {       // A -> B and C -> D, the pairs side by side
@@ -278,6 +287,16 @@ void echoPairs() {       // A -> B and C -> D, the pairs side by side
     const Wet w = run(e, p, impulseAt(60000, static_cast<int>(at)));
     CHECK(near(w.l[a], kH0, 0.01) && near(w.l[b], kH0 * kH0, 0.01) && near(w.l[c], kH0, 0.01) && near(w.l[d], kH0 * kH0, 0.01));
     CHECK(quietExcept(w.l, {a, b, c, d}, 2000) < 0.003f);
+    // A pair closes over its lines that are on (R63): with A off, B takes the send; with C off, D does.
+    for (int alone : {1, 3}) {
+        P q;
+        on(q, alone, alone == 1 ? k316 : k8);
+        q.routing = Echo::kPairs;
+        Rig f;
+        const Wet v = run(f, q, impulseAt(60000, static_cast<int>(at)));
+        const size_t hit = at + (alone == 1 ? 19845 : 13230);
+        CHECK(near(v.l[hit], kH0, 0.01) && quietExcept(v.l, {hit}, 2000) < 0.003f);
+    }
 }
 
 void echoSpread() {      // A <- x, then B, C and D <- yA: one hit, then a cloud
@@ -292,6 +311,14 @@ void echoSpread() {      // A <- x, then B, C and D <- yA: one hit, then a cloud
     const Wet w = run(e, p, impulseAt(60000, static_cast<int>(at)));
     CHECK(near(w.l[a], kH0, 0.01) && near(w.l[b], kH0 * kH0, 0.01) && near(w.l[c], kH0 * kH0, 0.01) && near(w.l[d], kH0 * kH0, 0.01));
     CHECK(quietExcept(w.l, {a, b, c, d}, 2000) < 0.003f);
+    // With A off the spread closes over the lines that are on (R63): B, C and D each take the send.
+    P q = p;
+    q.line[0].on = false;
+    Rig f;
+    const Wet v = run(f, q, impulseAt(60000, static_cast<int>(at)));
+    const size_t b1 = at + 6615, c1 = at + 19845, d1 = at + 26460;
+    CHECK(near(v.l[b1], kH0, 0.01) && near(v.l[c1], kH0, 0.01) && near(v.l[d1], kH0, 0.01));
+    CHECK(quietExcept(v.l, {b1, c1, d1}, 2000) < 0.003f);
 }
 
 void echoRing() {        // A <- x + yD, B <- yA, C <- yB, D <- yC: the hit goes round

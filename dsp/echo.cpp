@@ -42,13 +42,20 @@ constexpr Wire kWire[Echo::kRoutings][Echo::kLines] = {
     /* Spread   */ {{true, -1}, {false, 0}, {false, 0}, {false, 0}},
 };
 
-// The routing as it is wired for the lines that are on (R46): the table's, except that a Ring closes over the lines that are on,
-// each taking the previous one's feed, the first of them the send as well, and a lone one feeding itself. A line that is not on
-// (off, or fading out) is in no Ring. src[i] is -1 where line i takes no feed.
+// The routing as it is wired for the lines that are on (R46, R63): every routing closes over the lines that are on. In the
+// table's feed-forward routings a line whose source is not on (off, or fading out) takes what that source would have taken,
+// so a Serial chain skips it, B in Pairs takes the send when A is off (D when C is), and B, C and D in Spread take it when A
+// is. A Ring closes over them too: each takes the previous one's feed, the first of them the send as well, and a lone one
+// feeds itself. src[i] is -1 where line i takes no feed.
 void wiring(int routing, const bool* on, bool* x, int* src) {
     for (int i = 0; i < Echo::kLines; ++i) {
         x[i] = kWire[routing][i].x;
         src[i] = kWire[routing][i].src;
+        if (routing != Echo::kRing && src[i] >= 0 && !on[src[i]]) {   // (a source is always an earlier line, already wired)
+            const int s = src[i];
+            x[i] = x[s];
+            src[i] = src[s];
+        }
     }
     if (routing != Echo::kRing) return;
     int first = -1, prev = -1;
@@ -564,13 +571,11 @@ int Echo::tailSamples() const {
         const double trips = product > 1e-9 ? std::floor(std::log(1e-3) / std::log(product)) + 1.0 : 1.0;   // down to -60 dB
         return static_cast<int>(std::min(std::max(trips * static_cast<double>(trip), static_cast<double>(fading)), static_cast<double>(kForever)));
     }
-    const Wire* wire = kWire[p_.routing];
-    for (int pass = 0; pass < kLines; ++pass)   // (the other routings have no cycle)
-        for (int i = 0; i < kLines; ++i)
-            if (slot_[i].runs) {
-                const int src = wire[i].src;
-                reach[i] = std::min(own[i] + (src >= 0 && slot_[src].runs ? reach[src] : 0), kForever);
-            }
+    for (int i = 0; i < kLines; ++i)   // (the other routings have no cycle, and a source is always an earlier line)
+        if (slot_[i].runs) {
+            const int src = wireSrc_[i];
+            reach[i] = std::min(own[i] + (src >= 0 && slot_[src].runs ? reach[src] : 0), kForever);
+        }
     int64_t longest = 0;
     for (int i = 0; i < kLines; ++i) longest = std::max(longest, reach[i]);
     return static_cast<int>(longest);
