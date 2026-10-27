@@ -88,7 +88,8 @@ void silenceShape(P& p) {
 
 // What play() hands back: the left output, and how many parts ran in each chunk.
 struct Played {
-    Buf out;
+    Buf out;    // the left output
+    Buf outR;   // the right, from play()
     std::vector<int> running;
 };
 
@@ -109,6 +110,7 @@ Played play(const Buf& in, P p, Transport t, F edit, int chunk = kChunk) {
         r.running.push_back(g.running());
         if (t.playing) t.beats += n / static_cast<double>(kRate) * t.bpm / 60.0;
     }
+    r.outR = R;
     return r;
 }
 
@@ -1113,7 +1115,9 @@ void grooveEchoOrder() {
     // ... and Echo first (the Pump on the Dry) is the Pump on the dry and the echo of the input as it came.
     CHECK(maxDiff(a, plus(pumpAlone(first.pump, in, nullptr, t), minus(render(echoOnly, in, t), in))) < 2e-5);
     CHECK(maxDiff(part(b, 72000, 83000), part(a, 72000, 83000)) > 0.2);   // (they are not the same sound)
-    // Click-free when the order flips while playing: the dry and the wet cross over 10 ms.
+    // The Pump on the Echo, the order flipped while playing: the Pump's dry instance fades in as its wet instance
+    // fades out (10 ms), and nothing clicks in the 4410 samples after it. (What the Echo hears when the order
+    // flips is grooveOrderFlip's: the repeat of this 1/4 line comes after this window.)
     P gatedWet = first;
     gatedWet.pumpTarget = Groove::kEcho;   // first: the dry sounds and the echo is gated; last: the other way round
     auto flip = [](P& x, size_t at) { x.order = at >= 24576 ? Groove::kEchoLast : Groove::kEchoFirst; };
@@ -1123,6 +1127,59 @@ void grooveEchoOrder() {
     // After the flip the dry is gated and what the lines held is heard: a Pump that acts before the Echo does not reach back into it.
     CHECK(peak(f.out, 25100, 26000) > 0.3f);
     CHECK(allFinite(f.out));
+}
+
+// Ruling R50: an order change crossfades what the Echo hears over 10 ms. The Echo's source is the dry before Shape
+// and Pump (Echo first) or after them (Echo last); with a part on the Dry or on All whose gain is not 1 when the
+// order flips, a jump from one to the other steps the line, and the step is heard one delay later. A short line
+// (5 ms) and a 1/16 one, a sine at 220 Hz held by a Shape gate or a Pump's Hold on the Dry and on All, flipped both
+// ways: nothing in the window that covers the repeat is steeper than a sine of the amplitude and a 1 ms edge allow.
+void grooveOrderFlip() {
+    const size_t N = 40000, X = 8192;   // the flip
+    const Buf in = sine(220.0, static_cast<int>(N), 0.4f);
+    // The sine itself reaches a slope of 0.0125 and a gain edge of 1 ms on 0.4 is 0.009: more than 0.02 is a step.
+    // (The steps this test was written against were 0.17 on the Dry and 0.09 on All; now none is over the sine's.)
+    constexpr double kBound = 0.02;
+    for (int variant = 0; variant < 4; ++variant)
+        for (int line = 0; line < 2; ++line)
+            for (int dir = 0; dir < 2; ++dir) {
+                P p;
+                if (line == 0) echoFree(p, 5.0f);
+                else echoA(p, 0.25, 0.0f);
+                const int target = (variant % 2) == 0 ? Groove::kDry : Groove::kAll;
+                double beat = 2.2;
+                if (variant < 2) {   // a Square on Volume: silent from beat 2 to 4
+                    p.shapeOn = true;
+                    Shape::LaneParams& q = p.shape.lane[Shape::kVolume];
+                    q.on = true;
+                    q.shape = shapeIdx("Square");
+                    q.rateBeats = 4.0;
+                    q.depth = 1.0f;
+                    p.shapeTarget = target;
+                } else {   // a Hold: silent from beat 0.2 to 2.4
+                    silencePump(p);
+                    p.pumpOn = true;
+                    p.pumpTarget = target;
+                    beat = 0.2;
+                }
+                const int from = dir == 0 ? Groove::kEchoFirst : Groove::kEchoLast, to = dir == 0 ? Groove::kEchoLast : Groove::kEchoFirst;
+                auto flip = [&](P& x, size_t at) { x.order = at >= X ? to : from; };
+                const Played r = play(in, p, playingAt(beat), flip);
+                const size_t window = X + (line == 0 ? 6000 : 9000);   // the flip, the repeat, and the blend that follows it
+                CHECK(steepest(r.out, X, window) <= kBound);
+                CHECK(steepest(r.outR, X, window) <= kBound);   // (the right side is blended too)
+                CHECK(allFinite(r.out));
+            }
+    // With no part to move the dry, the order changes nothing the Echo hears: the flip is invisible, bit for bit.
+    {
+        P p;
+        echoFree(p, 5.0f);
+        const Played still = play(in, p, playingAt(0.0), [](P&, size_t) {});
+        for (int dir = 0; dir < 2; ++dir) {
+            auto flip = [&](P& x, size_t at) { x.order = (at >= X) == (dir == 0) ? Groove::kEchoLast : Groove::kEchoFirst; };
+            CHECK(same(play(in, p, playingAt(0.0), flip).out, still.out));
+        }
+    }
 }
 
 // Time Post bends the sum, so a tape stop stops the echoes too; Pre bends the input only and the echo rings on.
@@ -1736,6 +1793,7 @@ void firstSwitchOn() {
                 CHECK(a.running[X / kChunk + 1] == 4);
                 CHECK(b.running[X / kChunk + 1] == 4);
                 CHECK(clickFree(a.out, X - 2048, X, X + 4096));
+                CHECK(clickFree(b.out, X - 2048, X, X + 4096));   // (the memory arriving while the parts are already on)
             }
     }
 }
@@ -2040,6 +2098,7 @@ void grooveTests() {
     groovePumpWake();
     grooveSameKeyGains();
     grooveEchoOrder();
+    grooveOrderFlip();
     grooveTimePlace();
     grooveStepSwingRule();
     grooveKeyAfterTime();

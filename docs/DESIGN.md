@@ -16,7 +16,13 @@ way ShaperBox or Kickstart are, not a showpiece.
 - [Success and failure](#success-and-failure)
 - [Not in it](#not-in-it)
 - [Plan](#plan)
+- [Plan 2 rulings (2026-10-26)](#plan-2-rulings-2026-10-26)
 - [Open](#open)
+
+This is the design as approved on 2026-10-25, kept as the record. Plan 2 built the Echo, Time, the
+Moves and the factory presets (2026-10-26) and made calls the design left open; where the built
+plugin differs from the text below, [Plan 2 rulings](#plan-2-rulings-2026-10-26) says how. The
+[user guide](USER_GUIDE.md) describes the plugin as built.
 
 ---
 
@@ -60,7 +66,7 @@ design:
 | Latency | Not compensated (`acceptIOChanges`: no). GrooveForce is zero-latency |
 | Pages | MPC skins can't draw changing graphics (no drawn curves). Five tab groups show without a pager. Each page has its own Q-Link set |
 | MIDI into an insert | **Untested.** The host says it can send MIDI. EffectForce tells MPC it takes none. See [Open](#open) |
-| Getters | Polled about 600 times a second with the screen open; every getter must be cheap and lock-free |
+| Getters | Polled about 600 times a second with the screen open; every getter must be cheap. 2026-10-26 (plan 1's ruling R22, in the build ledger kept outside the repo): not lock-free, as first written. Values are atomics; the texts of the stepper, the tiles and the readouts are a cache behind a mutex that only the UI thread takes. The audio thread never takes it |
 | Stop | Suspends and resumes within 100 ms. Under 250 ms keeps every buffer (EffectForce's rule) |
 | CPU | 2902 µs per block per instance; a plugin passes at p99 ≤ 15% |
 
@@ -272,7 +278,7 @@ then returns. It is EffectForce's FX library and scene moves, put on Flex Beat's
   and back at the end;
 - a **mode**: **One Shot** (plays its length once from the next grid line), **Loop** (repeats until
   stopped) or **Hold** (while held, if the probe finds a skin button gives press and release; see
-  [Open](#open));
+  [Open](#open)). Plan 2 built One Shot and Loop only: Hold waits for the probe (R24);
 - a **launch quantize**: next 1/16, beat or bar.
 
 The MOVES page shows **16 Move tiles** (Flex Beat's pads). The factory set, my call: Throw Beat,
@@ -395,23 +401,158 @@ It fails, even if it technically works, if:
    Force (one instance and four), playing each must use case on the device, then 0.0.1 and the
    catalog entry.
 
+Where it stands, 2026-10-26: step 2 is done (plan 1) and was played on the Force: the Pump and the
+Shape work ("it works, but the hat are very very basic", the user, which pointed plan 2 at the Echo).
+Step 1 is done but for its last part: the probe is built ([PROBE.md](PROBE.md)), and its three device
+questions are still to be answered on the Force. Plan 2 builds steps 3 and 4 and the factory presets of
+step 5. Its last task is the one that needs the user: the bench on the Force, and playing the nine
+musts on the device.
+
 ### Your part
 
-Two decisions shape how GrooveForce feels, and the user writes them when the plan reaches them (as
-with EffectForce's Delay Glide and MasterForce's glue rule):
+Two decisions shape how GrooveForce feels. The design meant the user to write them when the plan
+reached them (as with EffectForce's Delay Glide and MasterForce's glue rule). Both were handed to
+Claude instead, and the user judges them by ear on the Force:
 
 - **The pump's curve** (step 2): the function from where in the step we are to the gain, for a
-  curve, depth and length. What makes a duck feel like Kickstart.
+  curve, depth and length. What makes a duck feel like Kickstart. The user, 2026-10-25: "Design the
+  pump for me for now, I will later check it on the force plugin" (plan 1's ruling R11, in the build
+  ledger, which is not in the repo). The ten curves in `dsp/pump_curves.cpp` are Claude's first
+  version.
 - **How swing moves audio** (step 4). When a 16th comes late, the playhead jumps back by the swing
   delay, which repeats the last few ms of the 16th before it. Alternatively it can glide back,
   bending the pitch a little like tape. Jump-and-crossfade is clean on drums. A glide is smoother on
-  tonal loops but bends their pitch (at 120 BPM, 20 ms over a 16th is about 16% slow).
+  tonal loops but bends their pitch (at 120 BPM, 20 ms over a 16th is about 16% slow). Handed over
+  with the rest of plan 2 ("do all at once, implement all that is open", 2026-10-26), and built as
+  jump and crossfade (R25).
 
 ### Left to the builder
 
 The DSP inside each part within its budget, the exact curves and the shape library's contents, the
 routing set refined by ear, parameter names and the page layouts, the reference material for
 level-matching, and anything here marked "about".
+
+## Plan 2 rulings (2026-10-26)
+
+The user asked to "do all at once, implement all that is open" (2026-10-26). These are Claude's calls,
+made while building the Echo, Time, the Moves and the presets. The R-numbers are the build ledger's
+(plan 2's, and plan 1's where it says so); the ledger is kept outside the repo, so each ruling says
+what was decided. Each says what the design text above no longer says.
+
+**Decided for the plan**
+
+- **R24, Moves without the probe.** One Shot and Loop. Hold and MIDI-triggered Moves and Pump wait
+  for the probe's answers ([Open](#open)). The Move parameter is automatable either way.
+- **R25, swing on audio.** Jump and crossfade: the playhead jumps back by the swing delay at the late
+  16th's straight line and forward again at the next pair's. Each jump is a 5 ms raised-cosine
+  crossfade that *ends on* the grid line, so a hit on the line is never heard early. No pitch bend.
+- **R26, the key.** The Pump's Input trigger always listens to the chain's input (after the input gain,
+  after Time when Time is Pre, before any part), whatever the Pump's target. Rumble, the Pump on the
+  Echo with the Input trigger, hears the dry kick, not the echo it ducks. The Echo's duck and its Env
+  and Follow modulators listen to the same key.
+- **R27, polyrhythm times.** "3/16" and "3/8" are the dotted 1/8 and 1/4 EffectForce's list already
+  has. The Echo's list adds 5/16, 7/16 and 5/8, sorted by length: 19 divisions (the Echo table
+  above says 16 plus four).
+- **R28, tile order.** The 16 Move tiles hold the 16 factory Moves in a fixed order. The selected
+  Move, the mode and the quantize are saved in a preset. Re-ordering the tiles waits.
+- **R29, dry level.** The Break Move needs the dry to drop while the echo rings. A `dry` parameter
+  (0 to 100%, default 100%, on SETUP) scales the dry bus where it joins the echo; the send, the key and
+  Mix are not scaled. Moves can ramp it.
+
+**Moves and Time**
+
+- **R35, the selected Move.** The `Move` parameter holds the selected Move, as the design says: it
+  stays on it when the Move ends. A change of it fires the new Move at the quantize, GO fires the
+  selected one again, None stops one that plays, and a preset or project load fires nothing.
+- **R37, ramps on the 0..1 travel.** A ramp's amount is a change of the parameter's 0..1 value. The
+  Throw's "feedback +0.3" meant 0.3 of its -1..1 range, which is 0.15 of travel; a log parameter's
+  travel is in octaves of its range (Filter Drop's two octaves).
+- **R38, a part a Move switched on stays on until its tail has rung out.** The Echo a Throw opened
+  keeps ringing (the chain's tail, at most 12 s) and then goes off as a switch does; a throw that cut
+  its own echoes would defeat the throw. Time, Shape and Pump have no tail to keep.
+- **R42, Time remembers.** Time's recorder runs whenever it has been allocated, not only while Time is
+  on, with Time's output untouched, bit for bit. Reverse Beat, Rewind, Spin-Back and Tape Stop play
+  audio from before the Move. The plugin allocates the recorder the first time Time is switched on or a
+  Move that needs it is selected or pressed. This supersedes "the recorder ring runs whenever Time is
+  on" in [Moves](#moves): on, or ever used. A copy that never used Time holds none.
+- **R43, jumps in a crossfade wait.** A jump that arrives while a crossfade runs (a pattern change, a
+  locate, a pattern's own jump) is made when the fade is over, at most 5 ms late, never a step.
+- **R49, Time warms up.** A groove that asks for a delay (Swing, Drunk, Push) switched on from rest
+  passes the input until the recorder holds that delay, a few tens of milliseconds. Without it the
+  output would drop out for the length of the delay and step back.
+- The Moves' ramps gained a **window** (from and to, as fractions of the Move's length), which Dub
+  Freeze and Break use. Time's library holds 15 patterns; the 16 Moves play 11 of them. Stutter 1/32,
+  Reverse Stutter, Gate 1/8 and Break Silence are in the library and on no tile.
+
+**The Echo**
+
+- **R36, the loop never gains.** Everything fed back into a line, its own feedback and what a routing
+  passes from line to line, is scaled by one over the filter's peak gain at its present setting (the
+  peak is Q for a low-pass or high-pass, up to 12 at resonance 100%; 1 for a band-pass and for
+  resonance 0). So the loop gain never exceeds the feedback, silence stays silent, feedback 100% holds
+  without growing and a Ring can't build up. A resonant filter in the loop keeps its tone in the
+  repeats, and what is heard keeps the filter's boost. Costs: passband repeats die faster at high
+  resonance.
+- **R39, R46, Ring.** Ring is the one routing with a cycle. A line's feedback is its send round the
+  ring and it has none of its own, so the loop gain is the product of the running lines' feedbacks (at
+  most 1): it never runs away, and the feedback knobs mean how much goes on round. The ring closes over
+  the lines that are on (R46); a lone running line feeds itself. This is what the design's "cross
+  feedback, dense" became: in Ring the feedback knob changes its meaning.
+- **R45, ping-pong in a Ring.** A ping-pong line in a Ring runs as stereo inside and passes its feed on
+  with left and right swapped, so the ping-pong happens round the ring (per trip, not per own repeat),
+  without loss.
+- **R44, Freeze holds in every routing.** Frozen, the feeds between lines stop in Serial, Pairs and
+  Spread, as the send does; in a Ring the feedbacks go to 1.
+- A line that is off gives a routing nothing: with A off, Serial, Pairs and Spread pass nothing down
+  from it, while a Ring closes over the lines that are on and hands the send to the first of them.
+- **R40, a routing change** crosses over 45 samples (1 ms), not one 32-sample chunk: the 1 ms rule for
+  gain edges wins.
+- **R41, one detector.** The Echo runs one onset detector and one level follower on the key for all
+  four lines' Env and Follow modulators, since they all hear the same key.
+- **R32, bounds.** The Echo's wet is finite and bounded for any input and any parameters; the test
+  bound is 8 (four lines, the pan law's root 2, the width), not the plan's 4.
+
+**The chain**
+
+- **R48, All on two buses.** A Pump or Shape aimed at All acts on the dry and the wet identically, as
+  if on their sum: two instances with the same parameters, grid and key. When the wet instance starts
+  (the Echo coming on, a target moving) it starts as a copy of the dry instance's state (grid phase,
+  detector, slews), so the two gains match from the first sample. A Shape filter that starts on a
+  wet that is already sounding rings in for a while: that is a limit.
+- **R50, the order switch.** Echo First against Echo Last switches the Echo's send source
+  (before or after the parts) with a 10 ms crossfade, so no switch steps what the Echo hears. For
+  10 ms it hears a blend.
+- **Plan 1's R21 is done:** the parts seed their grid from MPC's held position when stopped, and the
+  engine gives the parts and the Moves one clock.
+
+**From plan 1, which the design text above still has as first written**
+
+- **R22, the getters.** Lock-free as written was wrong: see the Getters row of
+  [What the Force does](#what-the-force-does).
+- **R11, the pump curves** were handed to Claude, not written by the user: see
+  [Your part](#your-part).
+- **R19, R18c, the Input trigger.** The detector listens through a 150 Hz low-pass, so hats on a drum
+  bus don't fire it and a kick with no low end won't. It is a level-ratio detector: a hit has to stand
+  out about 9 to 12 dB over what is sustained under it, rolls of 1/16 kicks need a keener sensitivity,
+  and rumble-like material can fire it now and then. A kick over a bass or a rumble wants the Grid
+  trigger. The Pump's Input push is 0 to +30 ms: there is no look-ahead, so the duck can't start
+  before the hit.
+- **R3b, banded peaks.** The Lows and Highs split is an allpass in the path, so an edgy waveform can
+  peak up to about 9 dB higher.
+
+**What the built plugin names differently**
+
+| The design says | Built |
+|---|---|
+| The Echo's "Mix" | **Echo Level** (the echo added to the dry, 0 to 100%) and **Echo Send** (the input into the lines) |
+| About 12 named pump curves | Ten: Smooth, Soft, Punch, Hard, Snap, Long, Late, Linear, S-Curve, Hold |
+| About 32 shapes; Pulse's 16 gate patterns | 38 shapes; 14 gate patterns (EffectForce's, without 1/16 and Pump) and four accents |
+| A Time pattern is 1/4, 1/2, 1 or 2 bars | A length in beats, half a beat (Spin-Back) to 16 (Roll Build 4 Bars) |
+| The Filter lane moves the cutoff by ±4 octaves | The cutoff dips from **Cutoff** by up to four octaves at the shape's bottom; a negative depth rises from it |
+| The parts as lit tiles on GROOVE | Off / On segments, with ORDER (Echo First / Echo Last) and TIME PLACE (Post / Pre) beside them |
+| SETUP: the transient detectors' sensitivity | Input, Output, Dry Level, the Pump's Sensitivity and Crossover, **Echo Sens** (the Env modulators' detector) |
+| Preset categories Hats & Perc, Stabs & Chords, Master & Perform | The folders Hats + Perc, Chords and Perform (shown in capitals) |
+| The status line on SETUP | Every page's header shows it: `CPU 3%   PEAK 5%   2 OF 4 ON` |
 
 ## Open
 
@@ -421,3 +562,6 @@ level-matching, and anything here marked "about".
 | Does a skin button give press and release, so a Move can play while held? | The same probe | Yes: Hold mode. No: One Shot and Loop only |
 | Does MPC play recorded automation back into an insert? (EffectForce's probe still has it pending) | The same probe: record the Move parameter in a sequence, play it back | Yes: Fills are sequenced by automating the Move. No: Moves are played live only, and Fills move to performance |
 | Do several instances spread over the Force's cores or add up on one? | The bench with four instances | How strict the typical ≤ 4% has to be |
+| Does a Move tile fire one Move per tap, and does a project load fire none? (plan 2) | On the Force: tap each tile, load a project with a Move selected. The tile rule flips what MPC read back, ignores a value the tile already has, and ignores the same tile for a second as MPC's release echo | Yes: the rule stays. No: it changes. It also depends on whether MPC writes the tiles and the Move back at a project load |
+| Do the ten pump curves feel right, and does the Input trigger hold up on a real kick and drum bus? (plans 1 and 2) | By ear on the Force | Retune the curves (one function); the detector if it misses or doubles hits |
+| Do the Echo's rumble, rolling bass, dub chord and polyrhythm setups, Hat Swing and the Moves sound right? (plan 2) | Plan 2's last task, with the user | Fix what they hear, each fix with a test |

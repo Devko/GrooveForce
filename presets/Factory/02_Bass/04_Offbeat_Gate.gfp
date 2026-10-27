@@ -1,6 +1,18 @@
 grooveforce 1
 shape_on=On
 vol_on=On
-vol_shape=Offbeat
-vol_rate=1 bar
+vol_shape=Square
+vol_rate=1/4
 vol_depth=1
+vol_phase=0.5
+echo_on=On
+echo_route=Parallel
+a_on=On
+a_level=1
+a_div=1/8
+a_fb=0
+a_mode=Mono
+a_ftype=LP
+a_cut=2500
+a_place=On Output
+output=0.9

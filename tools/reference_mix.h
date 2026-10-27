@@ -63,14 +63,27 @@ inline double lufs(const std::vector<float>& L, const std::vector<float>& R) {
 
 enum Part : int { CHORDS = 1, BASS = 2, KICK = 4, SNARE = 8, HATS = 16, DRUMS = KICK | SNARE | HATS, ALL = CHORDS | BASS | DRUMS };
 
-// The parts a factory category is matched on: its name as the browser shows it (the folder "03_Hats_+_Perc"
-// is "Hats + Perc"). A category this doesn't know gets the whole mix, as Perform, Echo and Utility do.
+// The parts each factory category is matched on, by its name as the browser shows it (the folder "03_Hats_+_Perc" is
+// "Hats + Perc"). surface/surface.py's LEVEL_CATEGORIES names the same categories: change both together.
+struct CategoryParts {
+    const char* category;
+    int parts;
+};
+inline constexpr CategoryParts kCategoryParts[] = {{"Kick", KICK},       {"Bass", BASS},     {"Hats + Perc", HATS | SNARE},
+                                                   {"Chords", CHORDS},   {"Drum Bus", DRUMS}, {"Perform", ALL},
+                                                   {"Echo", ALL},        {"Utility", ALL}};
+
+// Whether kCategoryParts has the category: another is judged on the whole mix, which levels.cpp and surface.py warn about.
+inline bool knownCategory(const std::string& category) {
+    for (const CategoryParts& c : kCategoryParts)
+        if (category == c.category) return true;
+    return false;
+}
+
+// The parts a category is matched on; one kCategoryParts doesn't know gets the whole mix.
 inline int partsFor(const std::string& category) {
-    if (category == "Kick") return KICK;
-    if (category == "Bass") return BASS;
-    if (category == "Hats + Perc") return HATS | SNARE;
-    if (category == "Chords") return CHORDS;
-    if (category == "Drum Bus") return DRUMS;
+    for (const CategoryParts& c : kCategoryParts)
+        if (category == c.category) return c.parts;
     return ALL;
 }
 

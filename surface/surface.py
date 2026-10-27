@@ -977,11 +977,89 @@ PRESET_EXT = ".gfp"
 STATE_EXTRA_KEYS = ("preset",)
 PRESET_NAME_MAX = 18      # an item tile on the browser page (816 px / 3 columns)
 CATEGORY_NAME_MAX = 12    # a category tile (320 px / 2 columns), shown in capitals
+OUTPUT_MAX_DB = 9.0       # a factory preset's Output: tools/levels.cpp sets it within this
+# The categories tools/reference_mix.h has material for (its kCategoryParts: change both together); anything else is
+# judged on the full mix.
+LEVEL_CATEGORIES = ("Kick", "Bass", "Hats + Perc", "Chords", "Drum Bus", "Perform", "Echo", "Utility")
 
 
 def _shown(entry):
-    """"02_Warm_Tape.gfp" -> "Warm Tape", "03_Loud" -> "Loud"."""
-    return re.sub(r"^\d+\s+", "", re.sub(r"\.gfp$", "", entry).replace("_", " "))
+    """"02_Warm_Tape.gfp" -> "Warm Tape", "03_Loud" -> "Loud". A name can't hold a "/" in a file name: "%2F" is one
+    ("07_Rolling_3%2F16.gfp" -> "Rolling 3/16", the Echo's division names)."""
+    return re.sub(r"^\d+\s+", "", re.sub(r"\.gfp$", "", entry).replace("_", " ")).replace("%2F", "/")
+
+
+def _defines(values):
+    """What a factory preset states about each part, Shape lane and Echo line it has on, even where that is today's
+    default (ruling R56): the values that define it, so that a later change of a default never moves a factory preset
+    (params.lock pins the keys, not their defaults). The keys it must name, with what they belong to."""
+    need = []
+    if values.get("pump_on") == "On":
+        need += [(k, "the Pump") for k in ("pump_rate", "pump_curve", "pump_depth", "pump_length")]
+        if values.get("pump_band", "Full") != "Full":
+            need.append(("pump_xover", "a banded Pump"))
+    if values.get("shape_on") == "On":
+        for lane, name in LANES:
+            if values.get(lane + "_on") == "On":
+                need += [(lane + k, "the %s lane" % name) for k in ("_shape", "_rate", "_depth")]
+        if values.get("flt_on") == "On":
+            need += [(k, "the Filter lane") for k in ("flt_type", "flt_cutoff")]
+    if values.get("echo_on") == "On":
+        need.append(("echo_route", "the Echo"))
+        for line, _ in LINES:
+            if values.get(line + "_on") == "On":
+                what = "line " + line.upper()
+                timing = (line + "_ms",) if values.get(line + "_sync") == "Free" else (line + "_div",)
+                need += [(k, what) for k in (line + "_level",) + timing + (line + "_fb",)]
+                if line + "_cut" in values:
+                    need.append((line + "_ftype", what + "'s filter"))
+    if values.get("time_on") == "On":
+        need.append(("time_place", "Time"))
+        groove = values.get("time_groove", "Off")
+        if groove == "Swing":
+            need += [(k, "Time's Swing") for k in ("swing", "swing_unit")]
+        elif groove != "Off":
+            need.append(("time_amount", "Time's " + groove))
+    if values.get("move", "None") != "None":
+        need += [(k, "the Move") for k in ("move_mode", "move_quant")]
+    return need
+
+
+def check_preset_sound(where, values, params):
+    """What a factory preset's lines say together, beyond each line on its own (EffectForce's rules, GrooveForce's
+    parts). Nothing is set on a part, a Shape lane or an Echo line the preset leaves off (a lane's or a line's switch
+    included), unless the Move it selects switches that on; a Move's mode and quantize go with a selected Move. What
+    defines each part that is on is stated (_defines, R56). A selected Move needs Time on: every factory preset with Moves
+    has it, so that the other tiles' Reverse Beat, Spin-Back and Rewind find audio Time has recorded (docs/DESIGN.md,
+    Moves; R42). The Output stays within +-OUTPUT_MAX_DB (tools/levels.cpp sets it). `values` maps keys to the lines'
+    values, options by name. Returns the errors."""
+    errors = []
+    on = {k for k, v in values.items() if k.endswith("_on") and v == "On"}
+    move = values.get("move", "None")
+    mv = next((m for m in MOVES if m["name"] == move), None)
+    if mv:
+        on |= {MOVE_PART_SWITCH[q] for q in mv["parts"]}
+        on |= {r["key"] for r in mv["ramps"] if r["kind"] == "set" and r["key"].endswith("_on") and r["value"] == "On"}
+        if values.get("time_on") != "On":
+            errors.append("%s: selects the Move %s but leaves Time off (a preset with Moves has Time on, so that Reverse "
+                          "Beat, Spin-Back and Rewind find recorded audio)" % (where, move))
+    else:
+        errors += ["%s: sets %s but selects no Move" % (where, k) for k in ("move_mode", "move_quant") if k in values]
+    names = {"pump": "the Pump", "shape": "Shape", "echo": "the Echo", "time": "Time"}
+    for key, val in values.items():
+        if key == "output" and abs(float(val)) > OUTPUT_MAX_DB + 1e-9:
+            errors.append("%s: output=%s: a factory preset's Output stays within +-%g dB (tools/levels.cpp)"
+                          % (where, val, OUTPUT_MAX_DB))
+        part = _part_of(key)
+        if part and key != MOVE_PART_SWITCH[part] and MOVE_PART_SWITCH[part] not in on:
+            errors.append("%s: sets %s but leaves %s off" % (where, key, names[part]))
+        own = next((s for s in ("vol_", "flt_", "pan_", "a_", "b_", "c_", "d_") if key.startswith(s)), None)
+        if own and key != own + "on" and own + "on" not in on:
+            errors.append("%s: sets %s but leaves %s off" % (where, key, own + "on"))
+    for key, what in _defines(values):
+        if key not in values:
+            errors.append("%s: %s is on but %s is not stated (a preset states what defines it, R56)" % (where, what, key))
+    return errors
 
 
 def check_preset_line(params, key, val):
@@ -1005,8 +1083,9 @@ def check_preset_line(params, key, val):
 def factory_presets():
     """[(category, name, text)]: one folder per category, both in file order ("NN_" orders them, "_" shows as a
     space). A factory preset sets sound parameters only, never the project's own (the preset index). Every line a
-    sound parameter with a value in range (options by name), every name unique (keys are "builtin:<name>") and
-    short enough for its tile: a typo fails the build, not the device."""
+    sound parameter with a value in range (options by name), the lines together sound (check_preset_sound), every
+    name unique (keys are "builtin:<name>") and short enough for its tile: a typo fails the build, not the device. A
+    category the level-matching has no material for is a warning."""
     params = {p["key"]: p for p in P}
     out, errors, seen = [], [], {}
     for d in sorted(os.listdir(PRESET_DIR)):
@@ -1019,6 +1098,9 @@ def factory_presets():
         category = _shown(d)
         if not category or len(category) > CATEGORY_NAME_MAX:
             errors.append("%s: a category name of 1..%d characters" % (d, CATEGORY_NAME_MAX))
+        if category not in LEVEL_CATEGORIES:
+            print("warning: presets/Factory/%s: tools/reference_mix.h has no material for %r: make preset-levels "
+                  "judges it on the full mix" % (d, category), file=sys.stderr)
         for f in sorted(os.listdir(folder)):
             if not f.endswith(PRESET_EXT):
                 continue
@@ -1027,7 +1109,7 @@ def factory_presets():
             lines = text.split("\n")
             if not lines[0].startswith("grooveforce "):
                 errors.append("%s: no 'grooveforce N' header" % where)
-            seen_keys = {}
+            seen_keys, values = {}, {}
             for n, line in enumerate(lines[1:], 2):
                 if not line.strip():
                     continue
@@ -1041,6 +1123,10 @@ def factory_presets():
                 bad = check_preset_line(params, key, val)
                 if bad:
                     errors.append("%s:%d: %s" % (where, n, bad))
+                else:
+                    opts = params[key].get("options")
+                    values[key] = opts[int(val)] if opts and val.isdigit() else val
+            errors += check_preset_sound(where, values, params)
             name = _shown(f)
             if name in seen:
                 errors.append("%s: the name %r is taken by %s" % (where, name, seen[name]))

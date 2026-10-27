@@ -64,6 +64,7 @@ void Groove::reset() {
     shapePart_ = shapeWetPart_ = pumpPart_ = pumpWetPart_ = echoPart_ = timePart_ = Part();
     fresh_ = true;
     echoLast_ = false;
+    sendMix_ = 0.0f;
     listening_ = false;
     running_ = 0;
 }
@@ -75,12 +76,11 @@ bool Groove::allocate(const Params& p) {
     return ok;
 }
 
-// What a part does in this chunk: where its fade is going, and whether it runs at all. A part wanted at another place
-// keeps its old one until it has faded out. Back on after resting it starts clean.
+// What a part does in this chunk: where its fade is going, and whether it runs at all. Back on after resting it
+// starts clean.
 template <class M>
-bool Groove::arm(M& m, Part& s, bool want, int where) {
-    if (fresh_ || s.fade == 0.0f) s.where = where;
-    s.goal = want && where == s.where ? 1.0f : 0.0f;
+bool Groove::arm(M& m, Part& s, bool want) {
+    s.goal = want ? 1.0f : 0.0f;
     if (fresh_) s.fade = s.goal;
     s.woke = s.goal > 0.0f && s.fade == 0.0f;   // coming on from rest
     if (s.woke && s.dirty) {
@@ -157,14 +157,17 @@ void Groove::set(const Params& p, const ef::Transport& t) {
 
     echoLast_ = orderOf(p.order) == kEchoLast;
     const Swing swing = stepSwing(p);
+    const bool echoWasRunning = echoPart_.runs;
 
     // The Echo and Time first: where the buses sound and where Time works depend on them. A part switched on before
     // its memory has arrived waits for it (silent, and it costs nothing).
-    if (arm(echo_, echoPart_, p.echoOn && echo_.allocated(), 0)) {
+    if (arm(echo_, echoPart_, p.echoOn && echo_.allocated())) {
         Echo::Params ep = p.echo;
         ep.swing = swing;
         echo_.set(ep, t);
     }
+    // What the Echo hears crosses over when the order changes (R50): nothing hears it while the Echo rests.
+    if (fresh_ || echoPart_.woke || !echoWasRunning) sendMix_ = echoLast_ ? 1.0f : 0.0f;
     armTime(p, t);
 
     // Shape and Pump, each on the buses its target names. The wet's instance begins together with the Echo, and with
@@ -172,8 +175,8 @@ void Groove::set(const Params& p, const ef::Transport& t) {
     // same key.
     const bool wetSounds = echoPart_.audible();
     const int shapeTarget = targetOf(p.shapeTarget), pumpTarget = targetOf(p.pumpTarget);
-    const bool sd = arm(shape_, shapePart_, p.shapeOn && onDry(shapeTarget, echoLast_), 0);
-    const bool sw = arm(shapeWet_, shapeWetPart_, p.shapeOn && onWet(shapeTarget, echoLast_, wetSounds), 0);
+    const bool sd = arm(shape_, shapePart_, p.shapeOn && onDry(shapeTarget, echoLast_));
+    const bool sw = arm(shapeWet_, shapeWetPart_, p.shapeOn && onWet(shapeTarget, echoLast_, wetSounds));
     join(shape_, shapePart_, shapeWet_, shapeWetPart_);
     if (sd || sw) {
         Shape::Params sp = p.shape;
@@ -181,8 +184,8 @@ void Groove::set(const Params& p, const ef::Transport& t) {
         if (sd) shape_.set(sp, t);
         if (sw) shapeWet_.set(sp, t);
     }
-    const bool pd = arm(pump_, pumpPart_, p.pumpOn && onDry(pumpTarget, echoLast_), 0);
-    const bool pw = arm(pumpWet_, pumpWetPart_, p.pumpOn && onWet(pumpTarget, echoLast_, wetSounds), 0);
+    const bool pd = arm(pump_, pumpPart_, p.pumpOn && onDry(pumpTarget, echoLast_));
+    const bool pw = arm(pumpWet_, pumpWetPart_, p.pumpOn && onWet(pumpTarget, echoLast_, wetSounds));
     join(pump_, pumpPart_, pumpWet_, pumpWetPart_);
     if (pd || pw) {
         Pump::Params pp = p.pump;
@@ -203,7 +206,6 @@ void Groove::runPart(Part& s, float* L, float* R, int n, F&& process) {
         std::memcpy(givenR_, R, sizeof(float) * static_cast<size_t>(n));
     }
     process(L, R, n);
-    s.age = static_cast<int>(std::min<int64_t>(static_cast<int64_t>(s.age) + n, kSettled));
     if (!fading) return;
     float g = s.fade;
     const float step = s.goal > g ? kFadeStep : -kFadeStep;
@@ -220,14 +222,37 @@ void Groove::runPart(Part& s, float* L, float* R, int n, F&& process) {
 void Groove::listen(float* L, float* R, int n) {
     std::memcpy(givenL_, L, sizeof(float) * static_cast<size_t>(n));
     std::memcpy(givenR_, R, sizeof(float) * static_cast<size_t>(n));
-    time_.process(givenL_, givenR_, n);
-    timePart_.age = static_cast<int>(std::min<int64_t>(static_cast<int64_t>(timePart_.age) + n, kSettled));
+    timeProcess(givenL_, givenR_, n);
 }
 
-// The wet bus: the Echo hears L / R (the send's source) and the key, and what it makes is faded in or out as the
-// Echo is switched.
+// Time over k samples; its ring has recorded that much more (Part::age, which only Time's warm-up reads).
+void Groove::timeProcess(float* l, float* r, int k) {
+    time_.process(l, r, k);
+    timePart_.age = static_cast<int>(std::min<int64_t>(static_cast<int64_t>(timePart_.age) + k, kSettled));
+}
+
+// The wet bus. L / R is the dry after Shape and Pump; the key is a copy of it from before them. The Echo hears one
+// or the other, as the order says, and a change of the order crosses from the one to the other over 10 ms (R50), so
+// that no switch steps the line: a part that moves the dry with a gain other than 1 would make a step one delay
+// before it is heard. Settled, the source is the one or the other itself, bit for bit. What the Echo makes is then
+// faded in or out as the Echo is switched.
 void Groove::makeWet(const float* L, const float* R, int n) {
-    echo_.process(L, R, keyL_, keyR_, wetL_, wetR_, n);
+    const float target = echoLast_ ? 1.0f : 0.0f;
+    const float* srcL = sendMix_ >= 1.0f ? L : keyL_;
+    const float* srcR = sendMix_ >= 1.0f ? R : keyR_;
+    if (sendMix_ != target) {
+        float o = sendMix_;
+        const float step = target > o ? kFadeStep : -kFadeStep;
+        for (int i = 0; i < n; ++i) {
+            o = std::clamp(o + step, 0.0f, 1.0f);
+            givenL_[i] = keyL_[i] + (L[i] - keyL_[i]) * o;
+            givenR_[i] = keyR_[i] + (R[i] - keyR_[i]) * o;
+        }
+        sendMix_ = o;
+        srcL = givenL_;
+        srcR = givenR_;
+    }
+    echo_.process(srcL, srcR, keyL_, keyR_, wetL_, wetR_, n);
     Part& s = echoPart_;
     s.dirty = true;
     if (s.fade == s.goal) return;
@@ -265,9 +290,9 @@ void Groove::process(float* L, float* R, int n) {
     }
 
     // Time, Pre: it bends the input before anything hears it, the key included.
-    auto timeProcess = [this](float* l, float* r, int k) { time_.process(l, r, k); };
+    auto timeRun = [this](float* l, float* r, int k) { timeProcess(l, r, k); };
     if (timePart_.where == kPre) {
-        if (timePart_.runs) runPart(timePart_, L, R, n, timeProcess);
+        if (timePart_.runs) runPart(timePart_, L, R, n, timeRun);
         else if (listening_) listen(L, R, n);
     }
 
@@ -278,11 +303,10 @@ void Groove::process(float* L, float* R, int n) {
         std::memcpy(keyR_, R, bytes);
     }
 
-    // The dry: the Echo hears it first (Echo first) or after Shape and Pump (Echo last).
-    if (echoRuns && !echoLast_) makeWet(L, R, n);
+    // The dry: Shape and Pump, then the Echo (which hears the dry from before them or from after, see makeWet()).
     if (shapePart_.runs) runPart(shapePart_, L, R, n, [this](float* l, float* r, int k) { shape_.process(l, r, k); });
     if (pumpPart_.runs) runPart(pumpPart_, L, R, n, [this](float* l, float* r, int k) { pump_.process(l, r, k, keyL_, keyR_); });
-    if (echoRuns && echoLast_) makeWet(L, R, n);
+    if (echoRuns) makeWet(L, R, n);
 
     // The wet: Shape and Pump on it, for as long as they are on it (an instance fading out of a bus runs on silence).
     const bool wetParts = shapeWetPart_.runs || pumpWetPart_.runs;
@@ -319,7 +343,7 @@ void Groove::process(float* L, float* R, int n) {
 
     // Time, Post: it bends the sum of the buses.
     if (timePart_.where == kPost) {
-        if (timePart_.runs) runPart(timePart_, L, R, n, timeProcess);
+        if (timePart_.runs) runPart(timePart_, L, R, n, timeRun);
         else if (listening_) listen(L, R, n);
     }
 

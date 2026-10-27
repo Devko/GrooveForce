@@ -122,6 +122,8 @@ MOD_DEPS_echo_mod := dsp/shapes.cpp dsp/pump_curves.cpp
 # Moves play Time patterns (the suite drives dsp/time.cpp from them) and name them from the generated tables.
 MOD_DEPS_moves := plugin/moves.cpp dsp/time.cpp
 MOD_DEPS_echo := dsp/echo_line.cpp dsp/shapes.cpp dsp/pump_curves.cpp
+# The plugin's second suite plays the whole plugin (its first suite has the host's fixtures it uses).
+MOD_DEPS_plugin_moves := $(SRC) test/plugin_test.cpp
 MOD_SRC = test/module_main.cpp test/$(M)_test.cpp $(wildcard dsp/$(M).cpp) $(MOD_DEPS_$(M))
 test-module: $(GEN) | $(BUILD)
 	@[ -n "$(M)" ] || { echo "usage: make test-module M=<module>"; exit 1; }

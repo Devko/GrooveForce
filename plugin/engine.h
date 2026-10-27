@@ -14,8 +14,9 @@
 //
 // The Moves. Once a chunk, Moves::apply() lays the Move that plays on a copy of the snapshot (ramps on the knobs, the parts it
 // needs switched on) and says which Time pattern to play and where it started. The copy becomes the chain's parameters (only
-// when it differs from the last chunk's: while nothing moves, the Moves cost nothing). A tile, GO, a change of the Move
-// parameter and a preset or project load reach the engine as MoveCalls from the UI thread (plugin/surface.h queues them; the
+// when it differs from the last one's, and a ramp's steps at most once in 128 frames: while nothing moves, the Moves cost
+// nothing, and a ramp that moves in every chunk costs one conversion a block). A tile, GO, a change of the Move
+// parameter and a preset or project load reach the engine as MoveCalls from the UI thread (plugin/surface.h holds them, coalesced; the
 // plugin passes them in at the start of a block): Moves::fire(), stop() and reset() run on the audio thread only. A preset or
 // project load ends the Move and what it had on (it fires nothing, whatever Move the new sound selects); a reset() clears the
 // Moves with everything else, Time's ring too.
@@ -58,6 +59,7 @@ public:
     int tailSamples() const { return groove_.tailSamples(); }   // how long it rings after the input stops (0: none)
     int running() const { return groove_.running(); }           // parts run in the last block, of kParts
     uint32_t litMoves() const;           // the Moves that play or wait for their line (bit k: Move k), for the tiles
+    uint32_t conversions() const { return conversions_; }   // (for tests) how often the chain's parameters were worked out
 
     // UI thread: the memory of the Echo's lines and of Time's ring, once. False if there was none to be had.
     bool allocateEcho() { return groove_.allocateEcho(); }
@@ -75,6 +77,9 @@ private:
     float norm_[P_COUNT];         // the snapshot
     float used_[P_COUNT];         // what params_ was last made from (the snapshot with the Moves on it)
     bool haveUsed_ = false;
+    static constexpr int kConvertGap = 128;   // frames between two workings out of the chain's parameters, a Move's ramps moving
+    int sinceConvert_ = kConvertGap;          // frames since the last one
+    uint32_t conversions_ = 0;
 
     double clock_ = 0.0;          // the grid's position at the next chunk, if MPC does not say
     bool fresh_ = true;           // the next chunk is the first since the start or a reset()

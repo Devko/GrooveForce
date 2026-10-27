@@ -1,0 +1,19 @@
+grooveforce 1
+echo_on=On
+echo_route=Parallel
+a_on=On
+a_level=0.6
+a_div=1/4
+a_fb=0.55
+a_ftype=BP
+a_cut=1400
+a_drive=0.35
+a_wow=0.6
+b_on=On
+b_level=0.4
+b_div=1/4.
+b_fb=0.45
+b_ftype=BP
+b_cut=1100
+b_drive=0.35
+b_wow=0.6
