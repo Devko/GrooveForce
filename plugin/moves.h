@@ -93,7 +93,8 @@ public:
     // Move goes round (a Loop). `frames` is the chunk's length; the default is the control chunk. The grid is MPC's song
     // position while it plays, else a clock that runs on at the tempo from where the last chunk ended: the same clock
     // Time's pattern start is measured on (TimeCore::process).
-    void apply(float* norm, const ef::Transport& t, int* timePattern, double* patternStart, bool* loop, int frames = ef::kChunk);
+    // Returns whether it may have written into norm (a ramp, a Set or a part switched on): false, and norm is as it was given.
+    bool apply(float* norm, const ef::Transport& t, int* timePattern, double* patternStart, bool* loop, int frames = ef::kChunk);
 
     // The grid position the last apply() started at: MPC's song position while it plays, else the clock. Time, when it does
     // not run every chunk, takes this as its song position, so that a pattern's start and its clock are never apart.

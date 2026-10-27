@@ -67,29 +67,30 @@ uint32_t Engine::litMoves() const {
 // always followed: a part that woke up while MPC was stopped takes the clock's place, not a place of its own.
 ef::Transport Engine::gridFor(const ef::Transport& t, int pos, int len) {
     const bool known = t.valid && std::isfinite(t.beats);
-    if (t.playing && known) clock_ = t.beats + pos * (t.bpm / 60.0 / ef::kRate);
+    const double bpm = ef::tempoOf(t);   // the parts' rule for a tempo (the position inside a block too, not the raw one)
+    if (t.playing && known) clock_ = t.beats + pos * (bpm / 60.0 / ef::kRate);
     else if (fresh_ && known) clock_ = t.beats;
     fresh_ = false;
     ef::Transport c = t;
     c.beats = clock_;
     c.playing = c.valid = true;
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);   // the parts' rule for a tempo
     clock_ += len * (bpm / 60.0 / ef::kRate);
     return c;
 }
 
 // R38: the Echo a Move switched on (the knobs have it off) stays on after the Move let go of it, for as long as the chain's
 // tail says it rings, and then it is the knobs' again: it fades off as a switch does.
-void Engine::keepEcho(float* norm, int len) {
+// True if it wrote into norm (the Echo held on).
+bool Engine::keepEcho(float* norm, int len) {
     if (norm_[P_ECHO_ON] > 0.5f) {   // the knobs have it on: nothing to keep
         echoMoved_ = false;
         echoHold_ = 0;
-        return;
+        return false;
     }
     if (norm[P_ECHO_ON] > 0.5f) {    // a Move has it on
         echoMoved_ = true;
         echoHold_ = 0;
-        return;
+        return false;
     }
     if (echoMoved_) {                // it just let go
         echoMoved_ = false;
@@ -98,7 +99,9 @@ void Engine::keepEcho(float* norm, int len) {
     if (echoHold_ > 0) {
         norm[P_ECHO_ON] = 1.0f;
         echoHold_ = std::max(echoHold_ - len, 0);
+        return true;
     }
+    return false;
 }
 
 void Engine::render(float* L, float* R, int n, const ef::Transport& t) {
@@ -112,18 +115,30 @@ void Engine::render(float* L, float* R, int n, const ef::Transport& t) {
         int pattern = -1;
         double patternStart = 0.0;
         bool loop = false;
-        moves_.apply(norm, c, &pattern, &patternStart, &loop, len);
-        keepEcho(norm, len);
+        bool laid = moves_.apply(norm, c, &pattern, &patternStart, &loop, len);
+        laid = keepEcho(norm, len) || laid;
         // The chain's parameters follow the snapshot with the Move on it (R53): a new snapshot at once, and what a Move's ramps
         // change at most once in 128 frames, a block. A conversion costs about 8000 ARM instructions, so four in a block for a
         // ramp that moves in every chunk cost 0.8% of it; every part glides a change over a millisecond or more, MPC's own
         // automation arrives a block at a time, and a ramp that is 2.9 ms late is not heard. A Time pattern is not a parameter:
         // it goes in every chunk, to the sample.
-        if (!haveUsed_ || (sinceConvert_ >= kConvertGap && std::memcmp(norm, used_, sizeof norm) != 0)) {
+        //
+        // R60a: the compare (916 bytes, 5.0k ARM instructions a block) has something to find only if `norm` is not the snapshot
+        // (a Move laid something on it, or the Echo is held on) or `used_` is not (the last conversion was made from one that was
+        // laid on: the Move has let go, or the gate held its last step). Otherwise both are the snapshot, and an idle chunk
+        // compares nothing. A Move that plays is not the test: a Move's switched-on parts are laid on `norm` with no ramp, and
+        // the release of the hold or the last step of a ramp leaves `used_` laid on after nothing is laid on `norm`.
+        bool convert = !haveUsed_;
+        if (!convert && sinceConvert_ >= kConvertGap && (laid || usedLaid_ || compareAlways_)) {
+            ++compares_;
+            convert = std::memcmp(norm, used_, sizeof norm) != 0;
+        }
+        if (convert) {
             params_ = grooveParams(norm);
             ++conversions_;
             std::memcpy(used_, norm, sizeof used_);
             haveUsed_ = true;
+            usedLaid_ = laid;
             sinceConvert_ = 0;
         }
         sinceConvert_ = std::min(sinceConvert_ + len, kConvertGap);

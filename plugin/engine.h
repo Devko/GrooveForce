@@ -15,7 +15,8 @@
 // The Moves. Once a chunk, Moves::apply() lays the Move that plays on a copy of the snapshot (ramps on the knobs, the parts it
 // needs switched on) and says which Time pattern to play and where it started. The copy becomes the chain's parameters (only
 // when it differs from the last one's, and a ramp's steps at most once in 128 frames: while nothing moves, the Moves cost
-// nothing, and a ramp that moves in every chunk costs one conversion a block). A tile, GO, a change of the Move
+// nothing, and a ramp that moves in every chunk costs one conversion a block; the two are not even compared in a chunk where
+// nothing was laid on the copy and the chain's parameters were made from the snapshot itself, R60a). A tile, GO, a change of the Move
 // parameter and a preset or project load reach the engine as MoveCalls from the UI thread (plugin/surface.h holds them, coalesced; the
 // plugin passes them in at the start of a block): Moves::fire(), stop() and reset() run on the audio thread only. A preset or
 // project load ends the Move and what it had on (it fires nothing, whatever Move the new sound selects); a reset() clears the
@@ -60,6 +61,8 @@ public:
     int running() const { return groove_.running(); }           // parts run in the last block, of kParts
     uint32_t litMoves() const;           // the Moves that play or wait for their line (bit k: Move k), for the tiles
     uint32_t conversions() const { return conversions_; }   // (for tests) how often the chain's parameters were worked out
+    uint32_t compares() const { return compares_; }         // (for tests) how often a chunk's snapshot was compared with the one in use
+    void compareAlways(bool on) { compareAlways_ = on; }    // (for tests) compare in every chunk, as before an idle chunk skipped it
 
     // UI thread: the memory of the Echo's lines and of Time's ring, once. False if there was none to be had.
     bool allocateEcho() { return groove_.allocateEcho(); }
@@ -67,7 +70,7 @@ public:
 
 private:
     ef::Transport gridFor(const ef::Transport& t, int pos, int len);
-    void keepEcho(float* norm, int len);
+    bool keepEcho(float* norm, int len);   // whether it wrote into norm
     void fire(int move);
     int pickOf(int id) const;
 
@@ -80,6 +83,9 @@ private:
     static constexpr int kConvertGap = 128;   // frames between two workings out of the chain's parameters, a Move's ramps moving
     int sinceConvert_ = kConvertGap;          // frames since the last one
     uint32_t conversions_ = 0;
+    uint32_t compares_ = 0;
+    bool usedLaid_ = false;       // used_ is a snapshot that a Move or the Echo hold was laid on: it may differ from norm_
+    bool compareAlways_ = false;
 
     double clock_ = 0.0;          // the grid's position at the next chunk, if MPC does not say
     bool fresh_ = true;           // the next chunk is the first since the start or a reset()

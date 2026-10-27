@@ -1322,7 +1322,10 @@ void grooveKeyAfterTime() {
         }
         return L;
     };
-    CHECK(same(got, byHand(true)));
+    // (R61: after a reset or at the start, Time warms up: the input passes for the lag, a crossfade and a chunk. The hand-built Time
+    // asks for its lag at once, so the two are compared from where the groove is in.)
+    const size_t warm = 882 + 2 * (gf::TimeCore::kFade + kChunk);   // the warm-up, then Time's own crossfade into the groove
+    CHECK(same(part(got, warm, got.size()), part(byHand(true), warm, got.size())));
     CHECK(maxDiff(got, byHand(false)) > 0.1);   // (hearing the kick 20 ms early is another duck)
     // The key is taken before every part, Shape's too: a kick that Shape's gate is holding back is still heard
     // by the Pump, and its duck is still going when the gate opens (bar 2 begins at beat 4 = sample 88200).
@@ -1912,6 +1915,115 @@ void grooveTimeSwitch() {
     }
 }
 
+// R61: a reset (the engine's, after a long suspend) empties Time's ring, so Time warms up from zero: the input passes bit
+// for bit until the ring holds the groove's lag, and only then does the groove come in, by Time's own crossfade. (It once
+// took the ring for full: a Push asked for its whole lag at once and got silence, then a step.) The run of zeros and the
+// steepest step are measured on a 200 Hz and a 110 Hz sine, after a second of play and a reset in the middle of it.
+void grooveResetWarmsTime() {
+    struct Case { int groove; float amount; int lag; const char* name; };
+    const Case cases[] = {{Time::kPush, 1.0f, 882, "Push 1.0"}, {Time::kPush, 0.5f, 441, "Push 0.5"}, {Time::kDrunk, 1.0f, 662, "Drunk 1.0"}};
+    for (const double hz : {200.0, 110.0})
+        for (const Case& c : cases) {
+            P p;
+            p.timeOn = true;
+            p.time.groove = c.groove;
+            p.time.amount = c.amount;
+            Transport t = playingAt(0.0);
+            Groove g;
+            CHECK(g.allocate(p));
+            double ph = 0.0;
+            Buf in, out;
+            bool recording = false;
+            auto chunk = [&](float* L, float* R) {
+                for (int i = 0; i < kChunk; ++i) {
+                    L[i] = R[i] = 0.5f * static_cast<float>(std::sin(ph));
+                    ph += 2.0 * kPi * hz / kRate;
+                }
+                if (recording) in.insert(in.end(), L, L + kChunk);
+                g.set(p, t);
+                g.process(L, R, kChunk);
+                t.beats += kChunk / static_cast<double>(kRate) * t.bpm / 60.0;
+            };
+            float L[kChunk], R[kChunk];
+            for (int k = 0; k < 44100 / kChunk; ++k) chunk(L, R);   // a second of play, Time already pushing
+            g.reset();
+            recording = true;
+            for (int k = 0; k < 4480 / kChunk; ++k) {
+                chunk(L, R);
+                out.insert(out.end(), L, L + kChunk);
+            }
+            // Warming up it is the input itself, bit for bit; the groove then comes in without a hole or a step.
+            const size_t warm = static_cast<size_t>(c.lag) + gf::TimeCore::kFade + kChunk;
+            size_t run = 0, longest = 0;
+            for (const float v : out) {
+                run = v == 0.0f ? run + 1 : 0;
+                longest = std::max(longest, run);
+            }
+            const double settled = steepest(in, 0, in.size());
+            const double step = steepest(out, 0, out.size());
+            if (longest > 2 || step > std::max(0.01, 1.25 * settled)) std::printf("  %-9s %3.0f Hz: %zu zeros in a row, steepest step %.4f (the input's own %.4f)\n", c.name, hz, longest, step, settled);
+            CHECK(same(part(out, 0, warm), part(in, 0, warm)));
+            CHECK(longest <= 2);   // (a sine crosses zero once in a while)
+            CHECK(step <= std::max(0.01, 1.25 * settled));
+            if (hz == 110.0) CHECK(maxDiff(part(out, warm + 600, out.size()), part(in, warm + 600, in.size())) > 0.1);   // and it does push
+            CHECK(allFinite(out));
+        }
+}
+
+// The chain waits for Time's ring to hold what the groove reads back: Time's own figure for the lag (Time::grooveLagSamples()), a
+// crossfade and a chunk. For Swing, Drunk and Push at a few tempos (and the ones Time clamps) it is Time's tail, which counts the
+// same lag and the same crossfade, and a chunk; and it is the length it always was: the lag's ceiling (the groove's old model,
+// written out here) and the 220 samples of crossfade and the 32 of a chunk.
+void grooveWarmsAsTimeLags() {
+    const double tempi[] = {5.0, 20.0, 47.78, 90.0, 120.0, 128.0, 174.0, 999.0, 5000.0, std::nan("")};
+    struct Case { int groove; float amount; Swing swing; };
+    Swing s58, s66, straight;
+    s58.amount = 0.58f;
+    s66.amount = 0.66f;
+    s66.unitBeats = 0.5;
+    straight.amount = 0.5f;
+    const Case cases[] = {{Time::kSwing, 0.5f, s58}, {Time::kSwing, 0.5f, s66}, {Time::kSwing, 0.5f, straight}, {Time::kDrunk, 1.0f, straight},
+                          {Time::kDrunk, 0.3f, straight}, {Time::kPush, 1.0f, straight}, {Time::kPush, 0.5f, straight}, {Time::kPush, 0.0f, straight},
+                          {Time::kOff, 1.0f, s58}};
+    for (const double bpm : tempi)
+        for (const Case& c : cases) {
+            Time::Params tp;
+            tp.groove = c.groove;
+            tp.amount = c.amount;
+            tp.swing = c.swing;
+            Transport t = transport(bpm, 0.0, true);
+            Time tm;
+            CHECK(tm.allocate());
+            tm.set(tp, t);
+            const int warm = Groove::warmSamples(tp, t);
+            const double lag = Time::grooveLagSamples(tp, t);
+            CHECK(warm == (lag > 0.0 ? static_cast<int>(std::ceil(lag)) + gf::TimeCore::kFade + kChunk : 0));
+            CHECK(warm == (tm.tailSamples() > 0 ? tm.tailSamples() + kChunk : 0));   // Time's own figure and a chunk
+            // the length it always was
+            const double clamped = bpm >= 20.0 ? std::min(bpm, 999.0) : (bpm < 20.0 ? 20.0 : 120.0);
+            double was = 0.0;
+            if (c.groove == Time::kSwing && gf::swingSplit(c.swing) > 0.0) was = (gf::swingSplit(c.swing) - c.swing.unitBeats) * 60.0 / clamped * kRate;
+            if (c.groove == Time::kDrunk) was = c.amount * Time::kDrunkMs * 0.001 * kRate;
+            if (c.groove == Time::kPush) was = c.amount * Time::kPushMs * 0.001 * kRate;
+            const int wasWarm = was > 0.0 ? static_cast<int>(std::ceil(was)) + 220 + 32 : 0;
+            if (warm != wasWarm) std::printf("  groove %d amount %.2f at %g BPM: warm %d, it was %d\n", c.groove, static_cast<double>(c.amount), bpm, warm, wasWarm);
+            CHECK(warm == wasWarm);
+        }
+    // (a few values, by hand: a Push at its full amount is 20 ms = 882 samples at any tempo; Drunk's 15 ms is 661.5; a Swing of
+    // 58% on 1/16 is 0.04 beats late = 882 samples at 120 BPM)
+    Time::Params push;
+    push.groove = Time::kPush;
+    push.amount = 1.0f;
+    CHECK(Groove::warmSamples(push, transport(60.0, 0.0, true)) == 882 + 220 + 32 && Groove::warmSamples(push, transport(174.0, 0.0, false)) == 882 + 220 + 32);
+    push.groove = Time::kDrunk;
+    CHECK(Groove::warmSamples(push, transport(120.0, 0.0, true)) == 662 + 220 + 32);
+    Time::Params sw;
+    sw.groove = Time::kSwing;
+    sw.swing = s58;
+    CHECK(Groove::warmSamples(sw, transport(120.0, 0.0, true)) == 882 + 220 + 32);
+    CHECK(Groove::warmSamples(sw, transport(60.0, 0.0, true)) == 1764 + 220 + 32);   // half the tempo, twice the samples
+}
+
 // A part moved from one bus to another while the echo sounds: out of the one, into the other, 10 ms each,
 // and from then on exactly what a part that had been there all along gives.
 void grooveBusMoves() {
@@ -2110,6 +2222,8 @@ void grooveTests() {
     firstSwitchOn();
     grooveEchoSwitch();
     grooveTimeSwitch();
+    grooveResetWarmsTime();
+    grooveWarmsAsTimeLags();
     grooveBusMoves();
     grooveFourParts();
     grooveChainContract();

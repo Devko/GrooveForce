@@ -30,6 +30,12 @@ struct Transport {
     bool valid = false;
 };
 
+// The tempo every part works at (BPM): MPC's, held to 20..999; 120 when it is not a number. The one rule: the parts, the
+// Moves and the engine's clock all move the grid by it, so they stay on the same line whatever MPC says.
+inline double tempoOf(const Transport& t) {
+    return t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+}
+
 // Sync divisions in quarter-note beats, shortest first (a Q-Link turn walks them in order). The
 // names are the options surface.py shows, same order.
 struct Division {
