@@ -152,7 +152,7 @@ private:
         n = std::clamp(n, 1, ef::kChunk);
         // Playing, the song position is MPC's (it moves for a locate, a loop, a tempo change). Otherwise
         // it runs on at the tempo from where it was.
-        const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+        const double bpm = ef::tempoOf(t);
         if (t.playing && t.valid && std::isfinite(t.beats)) pos_ = t.beats;
         const double start = pos_;
         pos_ += n * bpm / (60.0 * ef::kRate);

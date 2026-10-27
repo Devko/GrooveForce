@@ -24,24 +24,6 @@ float gainOf(float db) {
     return db == 0.0f ? 1.0f : ef::dbToGain(db);
 }
 
-// How much input Time's ring must have recorded before its groove is asked for: the groove's longest lag, a crossfade and a
-// chunk. Until then the ring holds nothing where the lag would read.
-int warmSamples(const Time::Params& tp, const ef::Transport& t) {
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);   // as Time takes it
-    double lag = 0.0;   // samples
-    switch (tp.groove) {
-    case Time::kSwing: {
-        const double split = swingSplit(tp.swing);
-        if (split > 0.0) lag = (split - tp.swing.unitBeats) * 60.0 / bpm * ef::kRate;
-        break;
-    }
-    case Time::kDrunk: lag = ef::clampParam(tp.amount, 0.0f, 1.0f, 0.5f) * Time::kDrunkMs * 0.001 * ef::kRate; break;
-    case Time::kPush: lag = ef::clampParam(tp.amount, 0.0f, 1.0f, 0.5f) * Time::kPushMs * 0.001 * ef::kRate; break;
-    default: break;
-    }
-    return lag > 0.0 ? static_cast<int>(std::ceil(lag)) + TimeCore::kFade + ef::kChunk : 0;
-}
-
 // A target as the part should act on it: out of range is the nearest one.
 int targetOf(int target) { return std::clamp(target, static_cast<int>(Groove::kAll), static_cast<int>(Groove::kEcho)); }
 
@@ -53,6 +35,11 @@ bool onWet(int target, bool echoLast, bool wetSounds) { return !echoLast && targ
 } // namespace
 
 Groove::Groove() = default;
+
+int Groove::warmSamples(const Time::Params& tp, const ef::Transport& t) {
+    const double lag = Time::grooveLagSamples(tp, t);
+    return lag > 0.0 ? static_cast<int>(std::ceil(lag)) + TimeCore::kFade + ef::kChunk : 0;
+}
 
 void Groove::reset() {
     shape_.reset();
@@ -124,7 +111,7 @@ void Groove::armTime(const Params& p, const ef::Transport& t) {
     s.goal = p.timeOn && allocated && place == s.where ? 1.0f : 0.0f;
     if (fresh_) {
         s.fade = s.goal;
-        s.age = s.goal > 0.0f ? kSettled : 0;   // on from the first chunk: nothing to wait for
+        s.age = 0;   // (R61) fresh is a new instance or a reset(): Time's ring is empty, whether Time is on or not, so it warms up from zero
     }
     s.runs = s.audible();
     listening_ = allocated && !s.runs;

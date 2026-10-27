@@ -340,6 +340,11 @@ public:
     static constexpr float kPushMs = 20.0f;     // Push's, at amount 1
     static constexpr double kReachBeats = 8.0;  // how far back a pattern can read (the library holds to this): its tail
 
+    // The groove's longest lag, in samples, for these parameters at this tempo (0: none, or no groove): how much later Swing's
+    // late unit starts than its straight line, or the amount's share of Drunk's or Push's longest. It is what the tail counts
+    // and what the chain waits for the ring to hold before it asks for the groove (Groove's warm-up); a pattern's reach is not in it.
+    static double grooveLagSamples(const Params& p, const ef::Transport& t);
+
     Time();
     bool allocate() { return core_.allocate(); }
     bool allocated() const { return core_.allocated(); }

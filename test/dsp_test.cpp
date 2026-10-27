@@ -67,6 +67,21 @@ void transport() {
     for (int i = 1; i < kNumLfoDivs; ++i) CHECK(kLfoDivs[i].beats > kLfoDivs[i - 1].beats);
 }
 
+// The one tempo rule (every part, the Moves and the engine's clock take it): 20..999, and 120 for what is not a number.
+void tempo() {
+    auto of = [](double bpm) {
+        Transport t;
+        t.bpm = bpm;
+        return tempoOf(t);
+    };
+    CHECK(of(120.0) == 120.0 && of(20.0) == 20.0 && of(999.0) == 999.0 && of(60.5) == 60.5);
+    CHECK(of(19.99) == 20.0 && of(0.0) == 20.0 && of(-90.0) == 20.0 && of(-INFINITY) == 20.0);
+    CHECK(of(999.5) == 999.0 && of(5000.0) == 999.0 && of(INFINITY) == 999.0);
+    CHECK(of(std::nan("")) == 120.0);
+    Transport dflt;
+    CHECK(tempoOf(dflt) == 120.0);
+}
+
 void measurement() {   // the test helpers themselves
     const Buf s = sine(1000.0, 16384, 0.5f);
     CHECK(std::fabs(magnitude(s, 1000.0) - 0.5) < 1e-3);
@@ -82,5 +97,6 @@ void dspTests() {
     ramp();
     delayLine();
     transport();
+    tempo();
     measurement();
 }

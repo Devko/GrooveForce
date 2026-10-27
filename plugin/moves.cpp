@@ -124,14 +124,14 @@ void Moves::follow(double jump) {
         if (r.move >= 0 && r.live) r.start += jump;
 }
 
-void Moves::apply(float* norm, const ef::Transport& t, int* timePattern, double* patternStart, bool* loop, int frames) {
+bool Moves::apply(float* norm, const ef::Transport& t, int* timePattern, double* patternStart, bool* loop, int frames) {
     *timePattern = -1;
     *patternStart = 0.0;
     *loop = false;
     frames = std::max(frames, 1);
 
     // Where the chunk starts and ends on the grid: TimeCore's rule (and clamps), so a pattern's start means the same to both.
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    const double bpm = ef::tempoOf(t);
     const double bps = bpm / 60.0 / ef::kRate;
     const double beat0 = t.playing && t.valid && std::isfinite(t.beats) ? t.beats : clock_;
     const double end = beat0 + frames * bps;
@@ -244,6 +244,8 @@ void Moves::apply(float* norm, const ef::Transport& t, int* timePattern, double*
     *timePattern = pattern;
     *patternStart = pattern >= 0 ? pstart : 0.0;
     *loop = pattern >= 0 && ploop;
+    // Whether norm may differ from what it was given: the Adds, the Sets and the parts switched on are all it writes.
+    return nAdd > 0 || nSet > 0 || parts != 0;
 }
 
 } // namespace gf

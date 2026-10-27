@@ -1216,6 +1216,190 @@ void resetConvertsTheKnobs() {
     }
 }
 
+// R60a: the engine compares the chunk's snapshot with the one in use only when something could differ. A twin runs the engine
+// as it is beside one that compares in every chunk (compareAlways, the engine as it was): the same noise, the same calls, and
+// every sample out and the number of conversions must be the same, block by block.
+struct Twin {
+    Engine skip, full;
+    ef::Transport t;
+    int calls = kBlock;      // a block is cut into calls of this many frames (the chunk is 32)
+    int frames = 0;          // rendered so far
+    bool same = true;        // so far: every sample, and the conversions, equal
+    int mostRunning = 0;     // the most parts that ran in a block
+    double moved = 0.0;      // the most the output has differed from the input
+    uint32_t seed = 1;
+
+    Twin() {
+        full.compareAlways(true);
+        t.playing = t.valid = true;
+    }
+    void knobs(const float* n) {
+        skip.setParams(n);
+        full.setParams(n);
+    }
+    void fire(int move) {
+        MoveCall c;
+        c.kind = MoveCall::kFire;
+        c.move = move;
+        skip.moveCall(c);
+        full.moveCall(c);
+    }
+    void render(int n) {   // n frames, in calls of `calls`
+        for (int done = 0; done < n;) {
+            const int len = std::min(calls, n - done);
+            Buf in = whiteNoise(len, 0.3f, seed++);
+            Buf al = in, ar = in, bl = in, br = in;
+            t.beats = frames / static_cast<double>(kBeat);
+            skip.render(al.data(), ar.data(), len, t);
+            full.render(bl.data(), br.data(), len, t);
+            same = same && al == bl && ar == br && skip.conversions() == full.conversions();
+            mostRunning = std::max(mostRunning, skip.running());
+            moved = std::max(moved, maxDiff(al, in, 0, in.size()));
+            frames += len;
+            done += len;
+        }
+    }
+    void blocks(int n) { render(n * kBlock); }
+};
+
+void defaultKnobs(float* n) {
+    for (int i = 0; i < P_COUNT; ++i) n[i] = PARAM_INFO[i].def;
+}
+
+// Idle, no chunk compares the snapshots: the knobs' (and a new snapshot, which is converted at once) are all there is. Filter Drop
+// then ramps the filter for four beats (the Adds), compares in the chunks it lays them on, and when it has glided out and its
+// last step is converted, the engine is idle again: no compare in the last blocks. The twin that compares in every chunk gives
+// the same samples and the same conversions throughout, from four phases of the 128-frame gate, in calls of 32 and of 128, with
+// the knobs turned in the middle of the ramp.
+void idleSkipsTheCompare() {
+    std::printf("== an idle engine compares nothing; a ramp's last step is still converted\n");
+    const int drop = moveOf("Filter Drop");
+    for (int calls : {32, kBlock})
+        for (int phase = 0; phase < kBlock; phase += 32) {
+            Twin w;
+            w.calls = calls;
+            float n[P_COUNT];
+            defaultKnobs(n);
+            w.knobs(n);
+            w.render(phase);
+            w.blocks(100);
+            CHECK(w.skip.compares() == 0 && w.skip.conversions() == 1);   // a snapshot, then nothing
+            CHECK(w.full.compares() > 90);                                // (the engine as it was compared in every block)
+            n[P_FLT_CUTOFF] = 0.8f;                                       // a new snapshot, idle again
+            w.knobs(n);
+            w.blocks(20);
+            CHECK(w.skip.compares() == 0 && w.skip.conversions() == 2);
+            w.fire(drop);
+            w.blocks(300);                                                // the line, and well into the ramp
+            CHECK(w.skip.compares() > 100);
+            for (int k = 0; k < 6; ++k) {                                 // the knobs turned while it plays
+                n[P_FLT_CUTOFF] = 0.2f + 0.1f * static_cast<float>(k);
+                w.knobs(n);
+                w.blocks(40);
+            }
+            w.blocks(500);                                                // out of the Move, glided out
+            const uint32_t compares = w.skip.compares(), conversions = w.skip.conversions();
+            w.blocks(40);
+            const bool quiet = w.skip.compares() == compares && w.skip.conversions() == conversions;
+            if (!w.same || !quiet) std::printf("  calls %d phase %d: same %d, quiet %d\n", calls, phase, w.same, quiet);
+            CHECK(w.same);
+            CHECK(quiet);
+            CHECK(w.moved > 0.01);   // (the ramp did move the sound)
+            CHECK(w.skip.compares() < w.full.compares() / 2);
+        }
+}
+
+// A pattern-only Move fired with Time off (its knob): the Move switches the part on itself, with no ramp. The twin must see the
+// Move play: Time runs (a part runs), the sound is the pattern's, and the switch off after is converted too.
+void idleSkipKeepsTheMovesParts() {
+    std::printf("== a Move that only switches a part on is not skipped\n");
+    for (const char* name : {"Reverse Beat", "Tape Stop", "Stutter 1/8"}) {
+        Twin w;
+        float n[P_COUNT];
+        defaultKnobs(n);
+        w.knobs(n);
+        CHECK(w.skip.allocateTime() && w.full.allocateTime());
+        w.blocks(3 * kBeat / kBlock);   // three beats of listening: the ring holds the past
+        const uint32_t before = w.skip.conversions();
+        w.fire(moveOf(name));
+        w.blocks(5 * kBeat / kBlock);
+        const bool played = w.mostRunning >= 1 && w.moved > 0.1;
+        if (!w.same || !played) std::printf("  %s: same %d, most parts running %d, moved %.3f\n", name, w.same, w.mostRunning, w.moved);
+        CHECK(w.same);
+        CHECK(played);                                        // Time ran with its knob off, and bent the noise
+        CHECK(w.skip.conversions() >= before + 2);            // on with the Move, off after it
+        CHECK(w.skip.running() == 0);                         // and off again
+        CHECK(w.skip.compares() < w.full.compares());
+    }
+}
+
+// R38's hold, released: a Throw switches the Echo on, the Echo stays on for its tail after the Move, then it is the knobs' again. The
+// release is a chunk where nothing is laid on the snapshot but the chain's parameters still have the Echo on: converted, from
+// every phase of the gate.
+void idleSkipKeepsTheHoldsRelease() {
+    std::printf("== the hold's release is converted\n");
+    for (int phase = 0; phase < kBlock; phase += 32) {
+        Twin w;
+        w.calls = 32;
+        float n[P_COUNT];
+        defaultKnobs(n);
+        n[P_A_ON] = paramNorm(P_A_ON, 1.0f);
+        for (int o = 0; o < PARAM_INFO[P_A_DIV].nopts; ++o)
+            if (!std::strcmp(PARAM_INFO[P_A_DIV].opts[o], "1/8")) n[P_A_DIV] = paramNorm(P_A_DIV, static_cast<float>(o));
+        n[P_A_FB] = paramNorm(P_A_FB, 0.5f);
+        n[P_ECHO_SEND] = paramNorm(P_ECHO_SEND, 0.0f);
+        w.knobs(n);
+        CHECK(w.skip.allocateEcho() && w.full.allocateEcho());
+        w.render(phase);
+        w.blocks(100);
+        w.fire(moveOf("Throw Beat"));
+        w.blocks(2 * kBeat / kBlock);   // the line, the Move, and the Echo's hold begins
+        CHECK(w.skip.running() == 1);
+        w.blocks(kBeat / kBlock);
+        n[P_FLT_CUTOFF] = 0.7f;         // a new snapshot while the hold is on: converted with the Echo still held on, and let go after
+        w.knobs(n);
+        w.blocks(8 * 44100 / kBlock);   // far past the tail
+        const bool off = w.skip.running() == 0;
+        const uint32_t compares = w.skip.compares();
+        w.blocks(40);
+        if (!w.same || !off) std::printf("  phase %d: same %d, off %d\n", phase, w.same, off);
+        CHECK(w.same);
+        CHECK(off);                                // released: the Echo is the knobs' again
+        CHECK(w.skip.compares() == compares);      // and idle again
+        CHECK(w.moved > 0.001);                    // (the Throw sent the noise into the Echo)
+    }
+}
+
+// The engine's grid (gridFor) moves by the tempo the parts use: 20..999, and 120 when it is not a number, the positions inside a
+// block too. A Pump follows the grid, in calls of 32: a tempo above the clamp sounds as the clamp itself, bit for bit.
+void tempoClampsInsideTheBlock() {
+    std::printf("== the grid inside a block moves by the clamped tempo\n");
+    float n[P_COUNT];
+    defaultKnobs(n);
+    n[P_PUMP_ON] = paramNorm(P_PUMP_ON, 1.0f);
+    n[P_PUMP_DEPTH] = paramNorm(P_PUMP_DEPTH, 1.0f);
+    auto playAt = [&](double bpm) {
+        Engine e;
+        e.setParams(n);
+        ef::Transport t;
+        t.playing = t.valid = true;
+        t.bpm = bpm;
+        Buf out;
+        for (int b = 0; b < 400; ++b) {
+            Buf l = whiteNoise(kBlock, 0.3f, 1 + static_cast<uint32_t>(b)), r = l;
+            t.beats = 0.2 + b * kBlock / 22050.0;
+            e.render(l.data(), r.data(), kBlock, t);
+            out.insert(out.end(), l.begin(), l.end());
+        }
+        return out;
+    };
+    const Buf at120 = playAt(120.0), at999 = playAt(999.0), at20 = playAt(20.0);
+    CHECK(maxDiff(at120, at999, 0, at120.size()) > 0.05 && maxDiff(at120, at20, 0, at120.size()) > 0.05);   // (the tempo is heard)
+    CHECK(playAt(5000.0) == at999 && playAt(999.5) == at999 && playAt(INFINITY) == at999);
+    CHECK(playAt(10.0) == at20 && playAt(-4.0) == at20);
+    CHECK(playAt(std::nan("")) == at120);
+}
+
 // R53's cost is a ramp that moves in steps of 128 frames (2.9 ms) instead of 32: Filter Drop on a 2 kHz sine, the filter's
 // cutoff falling two octaves from 6 kHz over its four beats, follows the low-pass's own response (second order, Butterworth)
 // to a percent or so all the way to the end of its ramp, the sine is the sine before and after, and nothing clicks.
@@ -1589,6 +1773,10 @@ void pluginMovesTests() {
     GF_RUN(echoHoldIsCapped);
     GF_RUN(rampsConvertOncePerBlock);
     GF_RUN(resetConvertsTheKnobs);
+    GF_RUN(idleSkipsTheCompare);
+    GF_RUN(idleSkipKeepsTheMovesParts);
+    GF_RUN(idleSkipKeepsTheHoldsRelease);
+    GF_RUN(tempoClampsInsideTheBlock);
     GF_RUN(rampKeepsItsWay);
     GF_RUN(moveCallsCoalesce);
     GF_RUN(loadAmongCalls);

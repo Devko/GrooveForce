@@ -90,7 +90,7 @@ void Shape::valuesOf(int lane, const LaneParams& q, double start, double end, fl
 
 void Shape::set(const Params& in, const ef::Transport& t) {
     const Params p = sanitized(in);
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    const double bpm = ef::tempoOf(t);
     perSample_ = bpm / (60.0 * ef::kRate);
     // Playing, the song position is MPC's (it moves for a locate, a loop, a tempo change). Otherwise
     // the position runs on at the tempo from where it was (process() moves it): from MPC's, the first

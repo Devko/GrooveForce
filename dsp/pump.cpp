@@ -65,7 +65,7 @@ void Pump::set(const Params& p, const ef::Transport& t) {
     // Where the chunk starts: MPC's song position while it plays, else where the last chunk ended. The
     // first chunk after reset() starts from MPC's position whether it plays or not: stopped, the grid
     // runs on from there at the tempo.
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    const double bpm = ef::tempoOf(t);
     bps_ = bpm / 60.0 / ef::kRate;
     const bool known = t.valid && std::isfinite(t.beats);
     b0_ = known && (t.playing || fresh_) ? t.beats : pos_;

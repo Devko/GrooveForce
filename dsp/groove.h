@@ -76,8 +76,8 @@
 // first sample recorded. So a Time whose ring has recorded less than the groove's longest lag and a crossfade
 // passes its input (recording) until it has, and only then engages the groove, by its own crossfade. With the
 // ring listening that is only the first moments after it was allocated or cleared. A Move's pattern is not
-// held back, since it has its own start on the grid. A Time that is on from the first chunk (the chain was
-// just reset) has nothing to wait for and does not warm up.
+// held back, since it has its own start on the grid. A Time that is on from the first chunk (a new instance, or
+// the chain was just reset) warms up too (R61): reset() empties the ring, and the first chunk's ring holds nothing.
 //
 // Memory. The Echo's lines and Time's ring are allocated on the UI thread by allocate() (the plugin calls
 // it when a switch goes on) and handed over to the audio thread through an atomic pointer inside each
@@ -136,6 +136,10 @@ public:
     bool allocate(const Params& p);
     bool allocateEcho() { return echo_.allocate(); }
     bool allocateTime() { return time_.allocate(); }   // also for Moves, which play their patterns from Time's ring
+
+    // How much input Time's ring must have recorded before its groove is asked for: the groove's longest lag (Time's own figure,
+    // Time::grooveLagSamples()), a crossfade and a chunk. Until then the ring holds nothing where the lag would read. 0: no lag.
+    static int warmSamples(const Time::Params& tp, const ef::Transport& t);
 
     // Swing applied once along the path (docs/DESIGN.md "The signal path and combining", 4): the swing
     // Shape's and Pump's steps follow. Straight when Time swings the audio they have changed.

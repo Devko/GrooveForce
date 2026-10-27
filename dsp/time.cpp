@@ -489,7 +489,7 @@ void TimeCore::readEdge(double back, double nowD, float& l, float& r) const {
 
 void TimeCore::process(float* L, float* R, int n, const ef::Transport& t, int pattern, double patternStart, double lagBeats) {
     if (n <= 0) return;
-    const double bpm = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    const double bpm = ef::tempoOf(t);
     const double bps = bpm / 60.0 / ef::kRate;     // beats a sample
     const double spb = ef::kRate * 60.0 / bpm;     // samples a beat
     // Where the chunk starts: MPC's song position while it plays, else where the last chunk ended.
@@ -694,6 +694,18 @@ void Time::reset() {
     tail_ = 0;
 }
 
+double Time::grooveLagSamples(const Params& p, const ef::Transport& t) {
+    switch (p.groove) {
+    case kSwing: {
+        const double split = swingSplit(p.swing);
+        return split > 0.0 ? (split - p.swing.unitBeats) / (ef::tempoOf(t) / 60.0 / ef::kRate) : 0.0;
+    }
+    case kDrunk: return static_cast<double>(ef::clampParam(p.amount, 0.0f, 1.0f, 0.5f) * kDrunkMs) * kMsSamples;
+    case kPush: return static_cast<double>(ef::clampParam(p.amount, 0.0f, 1.0f, 0.5f) * kPushMs) * kMsSamples;
+    default: return 0.0;
+    }
+}
+
 // The groove's lag, in beats, for the sample whose position 5 ms on is q (so a change is asked for 5 ms before its
 // line and ends on it), and the position where it next changes (HUGE_VAL: never).
 double Time::grooveLag(double q, double& until) {
@@ -772,7 +784,7 @@ void Time::set(const Params& in, const ef::Transport& t) {
     p_.amount = ef::clampParam(in.amount, 0.0f, 1.0f, 0.5f);
     p_.pattern = in.pattern >= 0 && in.pattern < numTimePatterns() && std::isfinite(in.patternStart) ? in.pattern : -1;
 
-    bpm_ = t.bpm >= 20.0 ? std::min(t.bpm, 999.0) : (t.bpm < 20.0 ? 20.0 : 120.0);
+    bpm_ = ef::tempoOf(t);
     bps_ = bpm_ / 60.0 / ef::kRate;
     tfb_ = TimeCore::kFade * bps_;
     // Playing, the song position is MPC's (it moves for a locate, a loop, a tempo change). Otherwise it runs on at the
@@ -807,20 +819,9 @@ void Time::set(const Params& in, const ef::Transport& t) {
     if (p_.pattern < 0 && zoneOn_ && (pos_ >= zTo_ || pos_ < zFrom_ - tfb_)) zoneOn_ = false;
 
     // The tail: the groove's longest lag, or a pattern's reach back, and a crossfade.
-    double lag = 0.0;
-    switch (p_.groove) {
-    case kSwing: {
-        const double split = swingSplit(p_.swing);
-        if (split > 0.0) lag = split - p_.swing.unitBeats;
-        break;
-    }
-    case kDrunk: lag = static_cast<double>(p_.amount * kDrunkMs) * kMsSamples * bps_; break;
-    case kPush: lag = static_cast<double>(p_.amount * kPushMs) * kMsSamples * bps_; break;
-    default: break;
-    }
-    const double beats = std::max(lag, reach);
-    tail_ = beats > 0.0 && core_.allocated()
-                ? static_cast<int>(std::min(std::ceil(beats / bps_) + TimeCore::kFade, static_cast<double>(TimeCore::kRingFrames)))
+    const double samples = std::max(grooveLagSamples(p_, t), reach / bps_);
+    tail_ = samples > 0.0 && core_.allocated()
+                ? static_cast<int>(std::min(std::ceil(samples) + TimeCore::kFade, static_cast<double>(TimeCore::kRingFrames)))
                 : 0;
 }
 
