@@ -4,4 +4,6 @@ pump_rate=1/4
 pump_curve=Hard
 pump_depth=1
 pump_length=0.45
+pump_trigger=Grid
+pump_target=All
 output=3.6

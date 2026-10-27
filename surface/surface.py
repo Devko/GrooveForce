@@ -995,17 +995,21 @@ def _defines(values):
     (params.lock pins the keys, not their defaults). The keys it must name, with what they belong to."""
     need = []
     if values.get("pump_on") == "On":
-        need += [(k, "the Pump") for k in ("pump_rate", "pump_curve", "pump_depth", "pump_length")]
+        need += [(k, "the Pump") for k in ("pump_rate", "pump_curve", "pump_depth", "pump_length", "pump_trigger",
+                                           "pump_target")]
         if values.get("pump_band", "Full") != "Full":
             need.append(("pump_xover", "a banded Pump"))
     if values.get("shape_on") == "On":
+        need.append(("shape_target", "Shape"))
         for lane, name in LANES:
             if values.get(lane + "_on") == "On":
                 need += [(lane + k, "the %s lane" % name) for k in ("_shape", "_rate", "_depth")]
         if values.get("flt_on") == "On":
             need += [(k, "the Filter lane") for k in ("flt_type", "flt_cutoff")]
     if values.get("echo_on") == "On":
-        need.append(("echo_route", "the Echo"))
+        # The route decides how the lines feed each other: with one line on it feeds itself and defines nothing.
+        if sum(values.get(line + "_on") == "On" for line, _ in LINES) >= 2:
+            need.append(("echo_route", "the Echo's lines"))
         for line, _ in LINES:
             if values.get(line + "_on") == "On":
                 what = "line " + line.upper()
@@ -1025,7 +1029,7 @@ def _defines(values):
     return need
 
 
-def check_preset_sound(where, values, params):
+def check_preset_sound(where, values):
     """What a factory preset's lines say together, beyond each line on its own (EffectForce's rules, GrooveForce's
     parts). Nothing is set on a part, a Shape lane or an Echo line the preset leaves off (a lane's or a line's switch
     included), unless the Move it selects switches that on; a Move's mode and quantize go with a selected Move. What
@@ -1126,7 +1130,7 @@ def factory_presets():
                 else:
                     opts = params[key].get("options")
                     values[key] = opts[int(val)] if opts and val.isdigit() else val
-            errors += check_preset_sound(where, values, params)
+            errors += check_preset_sound(where, values)
             name = _shown(f)
             if name in seen:
                 errors.append("%s: the name %r is taken by %s" % (where, name, seen[name]))

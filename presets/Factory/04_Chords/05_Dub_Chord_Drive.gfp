@@ -4,6 +4,7 @@ pump_rate=1/4
 pump_curve=Smooth
 pump_depth=0.7
 pump_length=0.6
+pump_trigger=Grid
 pump_target=Echo
 echo_on=On
 echo_route=Parallel
