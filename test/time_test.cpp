@@ -220,6 +220,131 @@ void timeEvaluator() { // the evaluator's laws on patterns whose curves are know
     CHECK(gf::timeSourceAt(rev, -1.0) == 0.0 && near(gf::timeSourceAt(rev, 3.0), 1.0, 1e-12));
 }
 
+// The crossfade's weight comes from a table (a cosine of a double in every sample of a fade was the Move's costliest line):
+// the raised cosine to 1.2e-7 (a float's own rounding is 6e-8 at 1), falling from 1 to 0, held to 0..1.
+void timeFadeWeights() {
+    double worst = 0.0;
+    bool falling = true;
+    float prev = 2.0f;
+    for (int k = 0; k <= 100000; ++k) {
+        const double r = k / 100000.0;
+        const float w = gf::timeFadeWeight(r);
+        worst = std::max(worst, std::fabs(static_cast<double>(w) - (0.5 + 0.5 * std::cos(kPi * r))));
+        falling = falling && w <= prev + 1e-7f;
+        prev = w;
+    }
+    CHECK(worst < 1.2e-7);
+    CHECK(falling);
+    CHECK(gf::timeFadeWeight(0.0) == 1.0f && gf::timeFadeWeight(1.0) == 0.0f && near(gf::timeFadeWeight(0.5), 0.5, 1e-7));
+    CHECK(gf::timeFadeWeight(-0.5) == 1.0f && gf::timeFadeWeight(7.0) == 0.0f && gf::timeFadeWeight(std::nan("")) == 1.0f);
+}
+
+// A curve evaluated as the engine did before it kept the numbers of the segment it stands on: a division at every call.
+double refValue(const gf::TPoint* p, int n, double x) {
+    if (!(x >= p[0].x)) return p[0].y;
+    int i = 0;
+    while (i + 2 < n && x >= p[i + 1].x) ++i;
+    const gf::TPoint &a = p[i], &b = p[i + 1];
+    if (x >= b.x) return b.y;
+    if (!(x > a.x)) return a.y;
+    return a.y + (static_cast<double>(b.y) - a.y) * ((x - a.x) / (static_cast<double>(b.x) - a.x));
+}
+double refSlope(const gf::TPoint* p, int n, double x) {
+    int i = 0;   // (before the start the cursor stands on the first segment)
+    while (i + 2 < n && x >= p[i + 1].x) ++i;
+    const gf::TPoint &a = p[i], &b = p[i + 1];
+    if (x >= b.x || !(b.x > a.x)) return 0.0;
+    return a.seg == gf::TSeg::Line ? (static_cast<double>(b.y) - a.y) / (static_cast<double>(b.x) - a.x) : 0.0;
+}
+
+// The numbers a curve keeps for its segment (its width's reciprocal, its slope, the Jump it heads for) give what dividing at every call
+// gave, to rounding, for every pattern of the library, going forward and jumping about: a locate sends the cursor back.
+void timeCurveNumbers() {
+    uint32_t seed = 7u;
+    const auto rnd = [&seed] {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<double>(seed >> 8) / 16777216.0;
+    };
+    double worst = 0.0, worstSlope = 0.0;
+    for (int p = 0; p < gf::numTimePatterns(); ++p) {
+        const gf::TimePatternDef& d = gf::timePatternDef(p);
+        for (int vol = 0; vol < 2; ++vol) {
+            const gf::TPoint* pts = gf::kTimePoints + (vol ? d.volFirst : d.srcFirst);
+            const int n = vol ? d.volCount : d.srcCount;
+            gf::TimeCurve c;
+            c.bind(pts, n);
+            const double len = d.lengthBeats;
+            double x = -0.05;
+            for (int k = 0; k < 4000; ++k) {
+                x = k % 7 == 6 ? (rnd() * 1.2 - 0.1) * len : x + len / 3000.0;   // forward, with a locate now and then
+                c.seek(x);
+                worst = std::max(worst, std::fabs(c.value(x) - refValue(pts, n, x)));
+                if (!vol) worstSlope = std::max(worstSlope, std::fabs(c.slope(x) - refSlope(pts, n, x)));
+            }
+        }
+    }
+    CHECK(worst < 1e-12);
+    CHECK(worstSlope < 1e-12);
+}
+
+// What a sample finds in the run an earlier sample left (the formulas of its segment, ready) is what it would have found by looking it
+// up: sample for sample, bit for bit. A run is left standing across chunks, and put away when the pattern is bound again or the tempo
+// changes (a locate, a re-fire or a lap ends it by x), so the script below does everything that could leave a stale one: chunks of
+// every size, a tempo step up and a ramp down, a locate, a re-fire, another pattern at the same start, a reset. It is played twice, with
+// runs and (useRuns(false)) without: no run, whatever else would have put one away.
+Buf playScript(const Buf& in, int p, bool loop, double baseBpm, bool runs) {
+    Time time;
+    CHECK(time.allocate());
+    time.useRuns(runs);
+    Buf L = in, R = in;
+    Time::Params q;
+    q.groove = p % 3 == 0 ? Time::kDrunk : Time::kOff;   // a groove under some of them: the pattern holds the playhead, the groove has the rest
+    q.amount = 0.7f;
+    q.pattern = p;
+    q.patternStart = 1.0;
+    q.loop = loop;
+    static const size_t sizes[] = {32, 7, 31, 32, 128, 1, 32, 32};
+    double bpm = baseBpm, beats = 0.0;
+    bool done[5] = {};
+    size_t k = 0;
+    for (size_t i = 0; i < in.size(); ++k) {
+        const size_t m = std::min(sizes[k % 8], in.size() - i);
+        const double f = static_cast<double>(i) / static_cast<double>(in.size());
+        if (!done[0] && f >= 0.25) done[0] = true, bpm = baseBpm * 1.3;                                   // a tempo step, up
+        if (f >= 0.40 && f < 0.55) bpm = baseBpm * (1.3 - 0.5 * (f - 0.40) / 0.15);                      // a ramp down
+        if (!done[1] && f >= 0.55) done[1] = true, bpm = baseBpm, beats += 0.37;                          // a locate forward, at the tempo again
+        if (!done[2] && f >= 0.65) done[2] = true, q.patternStart = std::ceil(beats * 4.0) / 4.0;         // the Move fired again, on the next 1/16
+        if (!done[3] && f >= 0.75) done[3] = true, q.pattern = (p + 5) % gf::numTimePatterns();           // another pattern, the same start
+        if (!done[4] && f >= 0.85) done[4] = true, time.reset();                                          // a long suspend
+        Transport t;
+        t.bpm = bpm;
+        t.beats = beats;
+        t.playing = t.valid = true;
+        time.set(q, t);
+        time.process(&L[i], &R[i], static_cast<int>(m));
+        beats += static_cast<double>(m) * bpm / 60.0 / kRate;
+        i += m;
+    }
+    CHECK(same(L, R));
+    return L;
+}
+
+void timeRuns() {
+    for (int p = 0; p < gf::numTimePatterns(); ++p)
+        for (const bool loop : {false, true}) {
+            const double len = gf::timePatternDef(p).lengthBeats;
+            const double bpm = 600.0;   // fast, for the long patterns: two laps of the longest is 32 beats
+            const double beats = loop ? 1.0 + 2.3 * len + 0.5 : 1.0 + 1.2 * len + 1.0;
+            const Buf in = whiteNoise(static_cast<int>(beats * kRate * 60.0 / bpm), 0.5f, 3u + static_cast<uint32_t>(p));
+            const Buf withRuns = playScript(in, p, loop, bpm, true);
+            const Buf without = playScript(in, p, loop, bpm, false);
+            const bool alike = same(withRuns, without);
+            if (!alike) std::printf("  %s%s: runs and lookups differ\n", gf::timePatternName(p), loop ? " going round" : "");
+            CHECK(alike);
+            CHECK(!same(withRuns, in));   // the script plays something
+        }
+}
+
 // --- the playhead ------------------------------------------------------------------------------
 
 void timeRest() {      // no pattern, lag 0: output == input bit for bit, whatever the chunks; and the ring records
@@ -2023,6 +2148,9 @@ void timeGrooveRobust() { // wild parameters and transports: finite, in range, n
 void timeTests() {
     timeData();
     timeEvaluator();
+    timeFadeWeights();
+    timeCurveNumbers();
+    timeRuns();
     timeRest();
     timeLag();
     timeJumpEndsOnLine();
