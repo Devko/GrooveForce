@@ -2,7 +2,6 @@ grooveforce 1
 swing=0.66
 swing_unit=1/16
 echo_on=On
-echo_route=Parallel
 a_on=On
 a_level=0.55
 a_pan=0.3

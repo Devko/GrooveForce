@@ -41,15 +41,16 @@ ARM emulation and have not been played on a device yet.
   keeps ringing until its repeats are gone. The Move parameter holds the selected Move; None stops one.
   No Hold and no MIDI yet: they wait for the probe.
 - **Swing:** 50-75% on 1/16 or 1/8, applied once along the path. With Time's Groove on Swing it moves
-  the audio, so a straight hat loop swings, and Shape's and Pump's steps stay straight (Time moves their
-  accents along). Otherwise it moves the Shape's, the Pump's and the Echo's LFO steps to match audio
-  that MPC's own note swing has already swung (set it to MPC's swing amount); the audio is then not
-  moved, and on a straight loop it puts accents off the hits.
+  the audio, so a straight hat loop swings. Placed Post, Time moves the Shape's and Pump's accents
+  along with the hits and their steps stay straight; placed Pre, they swing their steps to match.
+  Otherwise it moves the Shape's, the Pump's and the Echo's LFO steps to match audio that MPC's own
+  note swing has already swung (set it to MPC's swing amount); the audio is then not moved, and on a
+  straight loop it puts accents off the hits.
 - **Two buses:** a Pump or Shape on All acts on the dry and the echo alike, and starts on both in step
   when the Echo comes on. Changing the Echo's order crossfades over 10 ms.
 - **The plugin:** zero latency, on MPC's song position through loops, locates and tempo changes, no gain
   edge faster than 1 ms, and Init passes the input through bit for bit. Five tabs: GROOVE (GROOVE and
-  PRESETS), PUMP+SHAPE, ECHO (ECHO and LINE A to D), TIME (TIME and MOVES) and SETUP. Factory presets by
+  PRESETS), PUMP+SHAPE, ECHO (ECHO and LINE A to D), TIME (TIME and MOVES) and SETUP. 43 factory presets by
   job, favorites, recents and user presets.
 - **Limits:** the Pump's Input trigger finds hits that stand out about 9-12 dB over what is sustained
   under them (a kick over a bass needs Grid); the banded Pump's split can raise the peaks of an edgy
@@ -58,7 +59,9 @@ ARM emulation and have not been played on a device yet.
   [user guide](docs/USER_GUIDE.md#the-limits).
 - **Build:** `make arm-plugin` is profile-guided where qemu-arm runs (the trainer plays the reference
   mix through every option of every choice, the heaviest case and every factory preset); `make bench`
-  and `make bench-device` time the bench's cases ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)); `make
-  preset-levels` level-matches the factory presets on reference material; CI builds in
-  `arm32v7/gcc:11-bullseye` (glibc 2.31), runs the suite on x86 under ASan/UBSan and on ARM, and
-  checks the zip with the plugin catalog's `catalog_check.py`.
+  and `make bench-device` time the bench's ten cases (Init, each part at its heaviest, four instances,
+  everything at its heaviest; their settings are in tools/cases.h) on this machine and on the Force,
+  `make bench-count` counts their ARM instructions per block under qemu, and the numbers are in
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md); `make preset-levels` level-matches the factory presets
+  on reference material; CI builds in `arm32v7/gcc:11-bullseye` (glibc 2.31), runs the suite on x86
+  under ASan/UBSan and on ARM, and checks the zip with the plugin catalog's `catalog_check.py`.

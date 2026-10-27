@@ -488,23 +488,65 @@ never cuts its own echoes. Time, Shape and Pump switch off when the Move ends.
 ## Presets
 
 A factory preset is sorted by job, so you pick what you want to happen and the preset sets up the
-parts it needs. A preset sets only what it changes; everything it doesn't name goes to its default
-(Input, Output and Mix too). Each is level-matched on reference material for its category (the kick
-for Kick, the bass line alone for Bass, a hat loop, chords, a drum loop, a full mix), so it comes out
-about as loud as it went in, and you compare sounds, not levels. **Init** is everything off.
+parts it needs. A preset states the values that define what it does (a Pump's rate and curve, an
+Echo line's division and feedback, the Echo's routing once two lines are on), even where they equal
+the defaults, and it sets nothing on a part it leaves off; everything it doesn't name goes to its
+default (Input and Mix too; Output is set by the level matching). Each is level-matched at rest,
+before a Move fires, on reference material for its category (the kick for Kick, the bass line alone
+for Bass, the hats and the snare for Hats + Perc, the chords for Chords, the drums for Drum Bus, the
+full mix for Perform and Echo), so it comes out within 1 dB of the loudness it went in with, and you
+compare sounds, not levels. **Init** is everything off.
 
-| Category | The job | Presets (the factory set's names) |
+There are 43. Where a preset names a Move (Stab Throw, Fill Roller, the Perform presets, Freeze), the
+Move is selected, not fired: tap its tile or **GO**.
+
+| Category | Preset | What it does |
 |---|---|---|
-| **Kick** | The kick's tail becomes a dark rolling bed between kicks, the hypnotic-techno rumble: mono, a low-pass in the loop, the Pump ducking only the echo | Rumble, Rumble Deep, Rumble Short |
-| **Bass** | A pump on the bass; or one offbeat hit turned into a 16th roll | Bass Pump, Hard Pump, Double Pump, Offbeat Gate, Rolling Bass, Rolling Dark, Rolling 3/16 |
-| **Hats + Perc** | Hats that groove: accents and shuffle with an echo layer, polyrhythms on 3/16 and 5/16, ping-pong, swing and drunk timing | Hat Accents, Hat Shuffle, Polyrhythm, Poly 5/16, Ping-Pong Hats, Hat Swing 58, Hat Swing 66, Drunk Hats, Rim Echo |
-| **Chords** | Gates and pumps for chords, dub echoes, a throw for stabs | Chord Gate Pump, Filter Pump, Dub Chord, Dub Chord Wide, Dub Chord Drive, Stab Throw |
-| **Drum Bus** | A low pump, swing and accents on a loop, a roll for fills | Low Pump, Loop Groove, Bus Swing, Fill Roller |
-| **Perform** | Moves for the master: breakdowns, builds, throws, glitch | Breakdown, Build, Throws, Glitch |
-| **Echo** | The echo types on their own | Rumble Echo, Dub, Roll, Polyrhythm Echo, Ping-Pong, Tape, Slap, Spread Cloud, Freeze |
-| **Utility** | | Init |
+| **Kick** | Rumble | A dark mono bed under the kick: 1/16 and 1/8. lines through low-passes at about 200 Hz with drive and 70% feedback. The Pump ducks only the Echo, on the input's own kicks, so the bed is down at every kick and swells before the next. The dry kick is untouched |
+|  | Rumble Deep | Darker and longer: 1/8 and 1/8. lines, low-passes at 140 and 120 Hz, feedback 80%, more drive. The Long curve holds the bed down after the kick and lets it swell late |
+|  | Rumble Short | A tight tail after each kick: one 1/16 line, feedback 50%, low-pass at 250 Hz, a short Hard duck |
+| **Bass** | Bass Pump | The Kickstart duck on a bass: Smooth, 1/4, depth 80% |
+|  | Hard Pump | A Hard duck on every beat at full depth, with a short recovery |
+|  | Double Pump | Two ducks a beat: 1/8, Punch |
+|  | Offbeat Gate | An on-beat bass becomes an offbeat bass: a Square gate in Shape's Volume lane (1/4, phase 50%) shuts the on-beat 8th, and a single 1/8 repeat (no feedback, low-pass at 2.5 kHz on the output) puts the note on the offbeat |
+|  | Rolling Bass | One bass hit becomes a 16th roll: 1/16, feedback 50%, a low-pass at 1.2 kHz in the loop so each repeat is darker. A Hard duck on the whole signal keeps the beat free for the kick |
+|  | Rolling Dark | The same, darker and resonant: low-pass at 500 Hz with resonance and drive, feedback 60%, a Punch duck |
+|  | Rolling 3/16 | A roll on a 3/16 grid (1/8.) against the beat: feedback 55%, low-pass at 900 Hz. The Hard duck on every beat clears the repeats that fall on it |
+| **Hats + Perc** | Hat Accents | Offbeat Accent on the dry hats, plus a quiet 3/16 ghost layer panned right (high-pass at 2.5 kHz, its cutoff breathing over a bar). The Pump at 1/8 on the Echo ducks the ghosts under every 8th, so they sit between the hats |
+|  | Hat Shuffle | Shuffle accents and a pan sweep over a bar on the dry hats, plus a 1/8T ghost on the output. On 8th-note hats the ghosts land where 66% swung 16ths would: a shuffle from straight hats |
+|  | Polyrhythm | A **Ring** of three lines: 3/16 (left) into 5/16 (right) into 7/16 (centre, a band-pass moved by an LFO over 2 bars) and back into the 3/16. One hit goes round the room and comes back as a cross-rhythm every 15 sixteenths, in another colour each lap. The Pump at 1/8 on the Echo ducks the ring under every 8th |
+|  | Poly 5/16 | One 5/16 ping-pong line through a resonant band-pass at 3 kHz that an LFO moves over 2 bars, so each repeat has another colour. It comes round every 5 beats |
+|  | Ping-Pong Hats | A 1/8. ping-pong (high-pass at 2.5 kHz, feedback 40%, wide) with Shape aimed at the Echo: Rolling 16ths on the repeats' level, so the bounce has accents, and a low-pass that sweeps down and back over each bar |
+|  | Hat Swing 58 | Real swing on the audio: Time on Swing, 58% on 1/16, placed Post, with Rolling 16ths accents that ride with the hits |
+|  | Hat Swing 66 | The triplet feel: Time Swing at 66% on 1/16, plus a 1/16 ghost on the output that makes swung 16ths out of an 8th-note hat loop as well |
+|  | Drunk Hats | Time on Drunk (amount 60%), plus a 1/16. ping-pong echo with wow and a Random Smooth LFO on its low-pass, so every repeat is a little off and a little different |
+|  | Rim Echo | A dub rim in **Serial**: a 1/8. ping-pong through a resonant band-pass (drive, the Env modulator opening the cutoff on every hit) feeds a 1/4 line on the right. The second line echoes the first one's repeats a beat later, off their 3/16 grid. The Echo ducks under the input |
+| **Chords** | Chord Gate Pump | A Trance 1 gate in Shape's Volume lane plus a Pump at 1/4 |
+|  | Filter Pump | The filter ducks with the Pump Smooth shape at 1/4: a low-pass at 6 kHz whose cutoff dips on every beat |
+|  | Dub Chord | Dub techno: 1/8. and 1/4 lines left and right, band-passed around 900 Hz and 1.1 kHz in the loop, with drive and wow and an LFO over 2 bars moving the cutoffs. The Pump on the Echo keeps the wash off the kick |
+|  | Dub Chord Wide | Wider: 1/8. and 1/4. ping-pong lines, width 150%, more wow, and two LFOs moving the cutoffs in opposite directions over 2 and 4 bars |
+|  | Dub Chord Drive | Dirtier: resonant low-passes (1.8 kHz and 1.5 kHz) with drive, feedback up to 75%, and line A's Env modulator opening its cutoff on every stab |
+|  | Stab Throw | The echo hears a stab only when you throw it: a dub echo with its send closed and **Throw Beat** selected. Tap GO on the phrase's last beat |
+| **Drum Bus** | Low Pump | The lows pump on the bus's own kicks: the Pump on the lows below 120 Hz, fired by the Input |
+|  | Loop Groove | Swing and accents on a whole loop: Time Swing at 57% on 1/16, Rolling 16ths in the Volume lane at 50%, a slow pan over 2 bars |
+|  | Bus Swing | Swing at 56% on 1/8: a whole late 8th, so an 8th-note hat loop swings too |
+|  | Fill Roller | **Roll Build 1 Bar** on the tile with Move Quantize on Bar: one tap, a roll into the next bar |
+| **Perform** | Breakdown | **Break** on the tile, quantized to the bar: the dry drops out for a bar while its first beat rings on in a dub echo (a 1/4 line and a 1/8. ping-pong line, send closed until the Move opens it), the Pump on the Echo |
+|  | Build | **Roll Build 4 Bars** on the tile, quantized to the bar, with a dub echo (send closed) and a Pump on the Echo behind it. At rest it changes nothing you hear. Tap GO in the bar before a phrase: the roll builds over 4 bars and lands on the downbeat |
+|  | Throws | **Throw Bar** on the tile, quantized to the bar, into a ping-pong and a stereo line (send closed at rest, the Pump on the Echo) |
+|  | Glitch | **Stutter 1/16** on the tile, quantized to 1/16: a stutter from the next 16th |
+| **Echo** | Rumble Echo | The rumble as an Echo type: mono 1/16 and 1/8. lines with low-passes at 200 and 180 Hz and drive, ducked under the input (duck 70%) |
+|  | Dub | 1/8. and 1/4 lines through band-passes with drive and wow, an LFO on line A's cutoff, ducked a little |
+|  | Roll | A 16th roll that narrows: a band-pass at 1.8 kHz in the loop, feedback 60% |
+|  | Polyrhythm Echo | 3/16 left, 5/16 right, 7/16 in the centre, high-passes at 400-600 Hz in the loops, ducked |
+|  | Ping-Pong | A 1/8. ping-pong with a high-pass at 400 Hz in the loop, feedback 50%, width 120% |
+|  | Tape | Two tape heads (1/4 and 1/4.), wow 60%, drive, band-passed around 1.4 kHz and 1.1 kHz |
+|  | Slap | Two short slaps in free time, 95 ms left and 140 ms right, high-passed, with almost no feedback |
+|  | Spread Cloud | One hit, then a cloud: **Spread** routing, A (1/16) feeding B (1/8.), C (5/16) and D (7/16), each high-passed, time LFOs on B and C, wow on D, width 140% |
+|  | Freeze | An echo to freeze: three lines (1/4, 1/8. ping-pong and 1/2) at send 60%, with **Dub Freeze** on the tile, quantized to the bar |
+| **Utility** | Init | Everything off, unity |
 
-(The PRESETS page lists the set that is installed; the names above are the factory set's.)
+(The PRESETS page lists the set that is installed; the table is the factory set.)
 
 - **PRESETS page:** categories on the left (**FAVORITES** and **RECENT** first), presets on the right;
   tap to load. The **Favorite** toggle marks the loaded preset, **RND** loads a random one of the category, **SAVE**
@@ -557,8 +599,8 @@ Hats that groove, not just accents. Build them in layers.
 1. **Swing.** **Time** on, **Time Groove** Swing, **Swing** 58% for a light shuffle or 66% for a
    triplet feel. For a looser hand use **Drunk** with **Time Amount** around 30%.
 2. **Accents.** **Shape** on, **Volume** on, **Volume Shape** Offbeat Accent, **Volume Rate** 1 bar,
-   **Volume Depth** around 60%. (With Time swinging, Shape stays straight and Time moves the
-   accents along with the hits.)
+   **Volume Depth** around 60%. (With Time swinging and placed Post, the default, Shape stays
+   straight and Time moves the accents along with the hits.)
 3. **An echo layer on 3/16 and 5/16.** **Echo** on. **A On**, **A Division** 1/8., **A Pan** -50%.
    **B On**, **B Division** 5/16, **B Pan** +50%. **A Filter Type** and **B Filter Type** HP with
    **A Cutoff** and **B Cutoff** around 500 Hz (a high-pass starts at 20 kHz, which is almost

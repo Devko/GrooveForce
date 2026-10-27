@@ -23,8 +23,8 @@ a showpiece. Four parts, **Pump**, **Shape**, **Echo** and **Time**, and 16 one-
 | Echo | Sigmund-style depth: four stereo delay lines, A to D. Each has a division (1/64 to a bar, with triplets, dotted values and 5/16, 7/16 and 5/8 for polyrhythms) or a time of 1 to 2000 ms, its own feedback, level, pan and mode (stereo, ping-pong, mono), a filter (low-pass, band-pass, high-pass; in the loop or on the output), drive, wow, and a modulator (an LFO on a Shape's shape, an envelope fired by the input's hits, or the input's level) that moves its filter, time and level. Five routings (Parallel, Serial, Pairs, Ring, Spread), send, duck, freeze, width |
 | Time | Zero-latency time tricks on the audio: a swing that moves the audio itself (Swing), a loose hand (Drunk) and a laid-back one (Push), placed before or after the other parts, so a tape stop either stops the echoes or lets them ring. Behind it a recorder that never plays the future |
 | Moves | 16 one-tap actions on MPC's grid, fired at the next 1/16, beat or bar: Throw Beat, Throw Bar, Dub Freeze, Half-Time Bar, Tape Stop, Slow Down, Reverse Beat, Spin-Back, Stutter 1/8, Stutter 1/16, Roll Build 1 Bar, Roll Build 4 Bars, Filter Drop, Gate 1/16, Break, Rewind. One Shot or Loop; a tile, GO or the automatable Move parameter fires one |
-| Swing | 50-75% on 1/16 or 1/8, applied once along the path. With Time's Groove on Swing it moves the audio, so a straight hat loop swings, and Shape's and Pump's steps stay straight. Otherwise it moves the Shape's, the Pump's and the Echo's LFO steps to match audio that MPC's own note swing has already swung (set it to MPC's swing amount), and on a straight loop it puts accents off the hits |
-| Presets | Factory presets sorted by job (Kick, Bass, Hats + Perc, Chords, Drum Bus, Perform, Echo, Utility), a browser with favorites and recents, user presets saved from the screen |
+| Swing | 50-75% on 1/16 or 1/8, applied once along the path. With Time's Groove on Swing it moves the audio, so a straight hat loop swings; placed Post, Time moves the Shape's and Pump's accents along and their steps stay straight, placed Pre they swing their steps to match. Otherwise it moves the Shape's, the Pump's and the Echo's LFO steps to match audio that MPC's own note swing has already swung (set it to MPC's swing amount), and on a straight loop it puts accents off the hits |
+| Presets | 43 factory presets sorted by job (Kick, Bass, Hats + Perc, Chords, Drum Bus, Perform, Echo, Utility), a browser with favorites and recents, user presets saved from the screen |
 
 Whatever is on, it stays on MPC's song position through loops, locates and tempo changes (stopped, the
 grid runs on at the tempo), adds no latency, never clicks (no gain edge is faster than 1 ms, every
@@ -87,12 +87,17 @@ make arm-plugin            # build/arm/grooveforce.so (profile-guided where qemu
 make test-arm-pgo          # the suite against the objects that .so is linked from
 make levels                # how loud each factory preset comes out against its reference material
 make preset-levels         # sets their Output so each comes out about as loud as it went in
-make bench                 # the bench on this machine (x86 numbers say nothing about the Force)
-make bench-device          # CPU on the Force (FORCE=root@<ip> in local.mk)
+make bench                 # the cases of tools/cases.h timed on this machine (x86 numbers say nothing about the Force)
+make bench-count           # the same cases in ARM instructions per block, counted under qemu (QEMU_PLUGINS in local.mk)
+make bench-device          # the same cases timed on the Force (FORCE=root@<ip> in local.mk)
 make skin preview          # the skin, and every page as surface/build/page_*.png
 make plugin-package        # dist/GrooveForce-<version>-mpc-armv7.zip
 make plugin-install        # onto the Force; restarts MPC
 ```
+
+The bench has ten cases: Init, each part at its heaviest, four instances at once and everything at its
+heaviest. Their settings are in `tools/cases.h` (shared with the profile-guided build's trainer); what they
+cost on the Force, in time and in ARM instructions, is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 `surface/surface.py` is the single source of the parameter list, the pages, the shape library, the Time
 patterns, the 16 Moves and the factory presets' checks. `make arm-plugin` plays the reference mix

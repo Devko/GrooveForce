@@ -1,5 +1,6 @@
 grooveforce 1
 shape_on=On
+shape_target=All
 flt_on=On
 flt_shape=Pump Smooth
 flt_rate=1/4
