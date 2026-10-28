@@ -1,14 +1,14 @@
-# GrooveForce plan 1: groundwork, Pump and Shape
+# GrooveWerk plan 1: groundwork, Pump and Shape
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A GrooveForce that builds, tests and installs on the Force with two of its four parts,
+**Goal:** A GrooveWerk that builds, tests and installs on the Force with two of its four parts,
 Pump and Shape, on one shared swing grid. It comes with its pages, a first set of presets and the
 release machinery. A probe build answers the design's three open device questions.
 
-**Architecture:** GrooveForce's groundwork (build, VST2 glue, surface generator, skin, installer,
-CI) is copied from MasterForce, the newest sibling. The shared DSP pieces are copied from
-EffectForce 0.0.3. The sound lives in `dsp/` with EffectForce's module contract. The grid
+**Architecture:** GrooveWerk's groundwork (build, VST2 glue, surface generator, skin, installer,
+CI) is copied from MasterWerk, the newest sibling. The shared DSP pieces are copied from
+EffectWerk 0.0.3. The sound lives in `dsp/` with EffectWerk's module contract. The grid
 (`grid.h`) maps MPC's song position to straight time and back, so Pump and Shape swing the same
 way. `Groove` (`dsp/groove.*`) is the chain: a dry bus and a wet bus (silent until plan 2's Echo),
 each part acting on All, Dry or Echo. `plugin/` plays the chain from parameters that
@@ -28,7 +28,7 @@ once this one lands, because step 4 depends on this plan's probe results.
 - The module contract (`dsp/common.h`): `Module()` allocates (UI thread); `reset()`; `set(const Params&, const Transport&)` once per chunk; `process(float* L, float* R, int n)` in place, `1 <= n <= kChunk` (32); `tailSamples()`. No allocation, locks or exceptions in `set` / `process`; finite output for any finite input and any parameters; a NaN or infinity in the input never gets into a feedback path.
 - Budget: p99 ≤ 15% of the 2902 µs block per instance with everything on at its heaviest. Targets on the Force: Pump, banded, Input trigger ≤ 0.8%; Shape, three lanes ≤ 1%; the plugin's own work ≤ 0.6%. A typical preset ≤ 4%.
 - **Never clicks:** every jump, mode change, part on/off and transport jump is smoothed; no gain edge is faster than **1 ms**.
-- **On MPC's grid** through loops, locates and tempo changes (the song position, as EffectForce's Pulse). Stopped, the grid runs on at the tempo.
+- **On MPC's grid** through loops, locates and tempo changes (the song position, as EffectWerk's Pulse). Stopped, the grid runs on at the tempo.
 - **Defaults change nothing:** Init and every part's defaults pass the input through bit for bit until something is turned up. A part that is off costs no CPU; switching a part fades over 10 ms.
 - **Swing:** 50-75% on 1/16 or 1/8. A swung unit comes (swing − 50%) × 2 units late: at 120 BPM on 1/16, 58% is 20 ms and 66% is 40 ms. **Swing is applied once along the path** (`Groove::stepSwing`, Task 10).
 - No drawn curves: shapes and pump curves are picked by name.
@@ -37,7 +37,7 @@ once this one lands, because step 4 depends on this plan's probe results.
 - Getters cheap and lock-free (MPC polls ~600/s); at most one `audioMasterUpdateDisplay` per 50 ms (`Surface::kTextGap` = 2205 frames).
 - The `.so` exports only `VSTPluginMain`; release builds come from CI (glibc 2.31, GCC 11, profile-guided).
 - Category names ≤ 12 characters, preset names ≤ 18 (surface.py checks both).
-- Namespaces: `ef` for the code copied from EffectForce, `gf` for GrooveForce's own, `eft` for tests.
+- Namespaces: `ef` for the code copied from EffectWerk, `gf` for GrooveWerk's own, `eft` for tests.
 - Every commit message ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review Focus
@@ -54,10 +54,10 @@ once this one lands, because step 4 depends on this plan's probe results.
 
 | Path | Responsibility | Task |
 |---|---|---|
-| `.gitattributes`, `.gitignore`, `LICENSE`, `README.md`, `CHANGELOG.md` | From MasterForce, renamed | 1, 13 |
-| `Makefile` | MasterForce's, renamed (`gf_test`, `grooveforce.so`, `gfbench`), plus `test-module` | 1, 13 |
-| `third_party/mpc-vst-plugins/` | Vendored skin generator, installer, catalog check (MasterForce's copy) | 1 |
-| `dsp/common.h`, `fastmath.h`, `simd.h`, `svf.h` | Copied from EffectForce 0.0.3, unchanged | 1 |
+| `.gitattributes`, `.gitignore`, `LICENSE`, `README.md`, `CHANGELOG.md` | From MasterWerk, renamed | 1, 13 |
+| `Makefile` | MasterWerk's, renamed (`gf_test`, `groovewerk.so`, `gfbench`), plus `test-module` | 1, 13 |
+| `third_party/mpc-vst-plugins/` | Vendored skin generator, installer, catalog check (MasterWerk's copy) | 1 |
+| `dsp/common.h`, `fastmath.h`, `simd.h`, `svf.h` | Copied from EffectWerk 0.0.3, unchanged | 1 |
 | `dsp/grid.h` | Swing: song position ↔ straight time | 3 |
 | `dsp/pump_curves.h`, `pump_curves.cpp` | The named pump curves, `pumpLevel()` (**your part**) | 4 |
 | `dsp/shapes.h`, `shapes.cpp` | The shape library's evaluator; the data is generated | 5 |
@@ -66,13 +66,13 @@ once this one lands, because step 4 depends on this plan's probe results.
 | `dsp/pump.h`, `pump.cpp` | Pump | 8 |
 | `dsp/shape.h`, `shape.cpp` | Shape: Volume, Filter, Pan lanes | 9 |
 | `dsp/groove.h`, `groove.cpp` | The chain: buses, targets, on/off fades, input/output/mix, `stepSwing` | 10 |
-| `plugin/*` | MasterForce's glue without LEARN; `engine.*`, `groove_map.*` new | 11 |
+| `plugin/*` | MasterWerk's glue without LEARN; `engine.*`, `groove_map.*` new | 11 |
 | `surface/surface.py`, `skin_polish.py`, `fonts/`, `params.lock` | Parameters, pages, shapes data, preset checks | 1, 5, 11 |
 | `presets/Factory/NN_Category/NN_Name.gfp` | Factory presets | 1, 12 |
 | `test/check.h`, `signal.h`, `main.cpp`, `module_main.cpp`, `*_test.cpp`, `host.h` | Tests | every task |
 | `tools/bench.cpp`, `pgo_train.cpp`, `reference_mix.h` | Bench, PGO trainer, reference material | 13 |
 | `.github/workflows/build.yml` | CI: tests, device build, package, catalog check | 13 |
-| `probe/` | GrooveForce Probe: MIDI, press/release, automation playback | 2 |
+| `probe/` | GrooveWerk Probe: MIDI, press/release, automation playback | 2 |
 | `docs/PROBE.md`, `docs/PERFORMANCE.md` | The probe's questions and results; bench numbers | 2, 14 |
 
 ---
@@ -83,60 +83,60 @@ The repo builds and runs an empty suite on x86 and under qemu-arm. `surface.py` 
 `build/param_ids.h` from a minimal parameter list.
 
 **Files:**
-- Create: `.gitattributes`, `.gitignore`, `LICENSE` (copied from `D:\DEV\MasterForce`; LICENSE with the same holder line)
-- Create: `Makefile` (MasterForce's; see Step 3)
-- Create: `third_party/mpc-vst-plugins/` (copied whole from MasterForce, its `__pycache__` excluded)
-- Create: `dsp/common.h`, `dsp/fastmath.h`, `dsp/simd.h`, `dsp/svf.h` (copied from `D:\DEV\EffectForce\dsp` at 4b3e35a, unchanged)
-- Create: `surface/surface.py`, `surface/skin_polish.py`, `surface/fonts/` (MasterForce's; see Step 4)
-- Create: `presets/Factory/08_Utility/01_Init.gfp` (one line: `grooveforce 1`)
-- Create: `test/check.h`, `test/signal.h` (MasterForce's), `test/main.cpp`, `test/module_main.cpp` (EffectForce's), `test/dsp_test.cpp` (EffectForce's)
+- Create: `.gitattributes`, `.gitignore`, `LICENSE` (copied from `D:\DEV\MasterWerk`; LICENSE with the same holder line)
+- Create: `Makefile` (MasterWerk's; see Step 3)
+- Create: `third_party/mpc-vst-plugins/` (copied whole from MasterWerk, its `__pycache__` excluded)
+- Create: `dsp/common.h`, `dsp/fastmath.h`, `dsp/simd.h`, `dsp/svf.h` (copied from `D:\DEV\EffectWerk\dsp` at 4b3e35a, unchanged)
+- Create: `surface/surface.py`, `surface/skin_polish.py`, `surface/fonts/` (MasterWerk's; see Step 4)
+- Create: `presets/Factory/08_Utility/01_Init.gfp` (one line: `groovewerk 1`)
+- Create: `test/check.h`, `test/signal.h` (MasterWerk's), `test/main.cpp`, `test/module_main.cpp` (EffectWerk's), `test/dsp_test.cpp` (EffectWerk's)
 - Create: `README.md` (a stub: what it is, the link to docs/DESIGN.md, "not released")
 
 **Interfaces:**
 - Produces: `test/main.cpp` defines `eft::g_fail`, `eft::g_pass` and `main()`, which calls each suite's `void <name>Tests();` in order and prints `N passed, M failed`. Every later task adds its suite's call.
 - Produces: `make test`, `make test-arm`, `make test-module M=<name>` (builds `test/module_main.cpp` with `-DMODULE_TESTS=<name>Tests` and `test/<name>_test.cpp`).
-- Produces: `surface.py` writes `surface/build/param_ids.h` (`P_COUNT`, `PARAM_SPECS`, `PARAM_INFO`, `Curve`, `Fmt`, `Kind`) as MasterForce's does, in `namespace gf`.
+- Produces: `surface.py` writes `surface/build/param_ids.h` (`P_COUNT`, `PARAM_SPECS`, `PARAM_INFO`, `Curve`, `Fmt`, `Kind`) as MasterWerk's does, in `namespace gf`.
 
 - [ ] **Step 1: Copy the files above.** Run `git add --renormalize .` after `.gitattributes` is in, because `docs/DESIGN.md` was committed with CRLF.
 
-- [ ] **Step 2: Write `test/main.cpp`** to call `dspTests()` only (EffectForce's `test/dsp_test.cpp`: levels, fast math, ramp, delay line, transport, the helpers).
+- [ ] **Step 2: Write `test/main.cpp`** to call `dspTests()` only (EffectWerk's `test/dsp_test.cpp`: levels, fast math, ramp, delay line, transport, the helpers).
 
-- [ ] **Step 3: Adapt the Makefile.** Rename `mf_test` → `gf_test`, `masterforce.so` → `grooveforce.so`, `mfbench` → `gfbench`, `MF_` → `GF_`, `Devko - VST - MasterForce` → `Devko - VST - GrooveForce`, `--repo Devko/GrooveForce`, the package's `--about` (from DESIGN.md's first paragraph) and `PKG := GrooveForce-$(PLUGIN_VERSION)`, preset extension `.mfp` → `.gfp`. Remove the `proto` target. Set `TESTS := $(filter-out test/module_main.cpp,$(wildcard test/*.cpp))`. Add EffectForce's `test-module` target.
+- [ ] **Step 3: Adapt the Makefile.** Rename `mf_test` → `gf_test`, `masterwerk.so` → `groovewerk.so`, `mfbench` → `gfbench`, `MF_` → `GF_`, `Devko - VST - MasterWerk` → `Devko - VST - GrooveWerk`, `--repo Devko/GrooveWerk`, the package's `--about` (from DESIGN.md's first paragraph) and `PKG := GrooveWerk-$(PLUGIN_VERSION)`, preset extension `.mfp` → `.gfp`. Remove the `proto` target. Set `TESTS := $(filter-out test/module_main.cpp,$(wildcard test/*.cpp))`. Add EffectWerk's `test-module` target.
 
-- [ ] **Step 4: Cut surface.py down to the machinery.** `VST = {"name": "GrooveForce", "vendor": "Devko", "uid": "GrFc", "version": 1000, "so": "grooveforce.so", "params": "params.json", "layout": "layout.conf", "effect": True}`. Parameters: `readout("status", "Status")`, `num("input", "Input", "lin", -24, 24, 0, "db")`, `num("output", "Output", "lin", -24, 24, 0, "db")`, `num("mix", "Mix", "lin", 0, 1, 1, "pct")`, and the preset stepper, browser tiles and buttons as MasterForce has them. Pages: GROOVE (one card with the three knobs) and PRESETS (MasterForce's browser). Keep the layout checks, `factory_presets()` (header `grooveforce `, `PRESET_EXT = ".gfp"`, no `LEARNED_KEYS`), `check_lock`, `header()` (namespace `gf`). Remove TARGETS, STYLES, MONO and LEARN.
+- [ ] **Step 4: Cut surface.py down to the machinery.** `VST = {"name": "GrooveWerk", "vendor": "Devko", "uid": "GrFc", "version": 1000, "so": "groovewerk.so", "params": "params.json", "layout": "layout.conf", "effect": True}`. Parameters: `readout("status", "Status")`, `num("input", "Input", "lin", -24, 24, 0, "db")`, `num("output", "Output", "lin", -24, 24, 0, "db")`, `num("mix", "Mix", "lin", 0, 1, 1, "pct")`, and the preset stepper, browser tiles and buttons as MasterWerk has them. Pages: GROOVE (one card with the three knobs) and PRESETS (MasterWerk's browser). Keep the layout checks, `factory_presets()` (header `groovewerk `, `PRESET_EXT = ".gfp"`, no `LEARNED_KEYS`), `check_lock`, `header()` (namespace `gf`). Remove TARGETS, STYLES, MONO and LEARN.
 
 - [ ] **Step 5: Check that `GrFc` is free.** Run `grep -rn '"GrFc"' third_party/mpc-vst-plugins` and search the catalog (`https://github.com/sd88me/mpc-vst-plugins/tree/main/catalog/plugins`) for `GrFc`. Expected: no hit. On a hit, pick another four-letter ID and say so in the commit.
 
 - [ ] **Step 6: Run the suites.**
   Run (in WSL): `make surface && make test && make test-arm`
-  Expected: `surface: <n> parameters, layout ok, 1 factory presets`; both suites print `N passed, 0 failed`. N is EffectForce's dsp count, the same on both.
+  Expected: `surface: <n> parameters, layout ok, 1 factory presets`; both suites print `N passed, 0 failed`. N is EffectWerk's dsp count, the same on both.
 
-- [ ] **Step 7: Commit** — `git add -A && git commit -m "Groundwork: MasterForce's build and surface, EffectForce's shared DSP"`.
+- [ ] **Step 7: Commit** — `git add -A && git commit -m "Groundwork: MasterWerk's build and surface, EffectWerk's shared DSP"`.
 
 ---
 
 ### Task 2: The probe
 
-A GrooveForce Probe build that answers the design's Open table: MIDI into an insert, press and
+A GrooveWerk Probe build that answers the design's Open table: MIDI into an insert, press and
 release, automation playback. The user runs it on the device. Nothing later in this plan waits for
 its results; plan 3 (Time and Moves) does.
 
-What the siblings already know (`plugin/surface.h` in MasterForce): a button always reads back 0
+What the siblings already know (`plugin/surface.h` in MasterWerk): a button always reads back 0
 and **no release ever follows** a press. A tile tap sends a **release echo about 0.7 s later**. The
 probe checks whether that echo's timing follows how long the finger stays down (a hold) or is
 fixed.
 
 **Files:**
-- Create: `probe/` (copied from `D:\DEV\EffectForce\probe`: `Makefile`, `dsp/`, `plugin/`, `surface/surface.py`, `test/`; not `build/`, `dist/`, `surface/build/`)
+- Create: `probe/` (copied from `D:\DEV\EffectWerk\probe`: `Makefile`, `dsp/`, `plugin/`, `surface/surface.py`, `test/`; not `build/`, `dist/`, `surface/build/`)
 - Modify: `probe/plugin/plugin.cpp`, `probe/plugin/probe.{h,cpp}`, `probe/surface/surface.py`, `probe/test/probe_test.cpp`
 - Modify: `probe/test/host.h` (helpers the tests below use: `canDo(name)`, `midi(bytes, deltaFrames)` through `effProcessEvents`, `readout(key)`, `set(key, v)`, `advanceMs(ms)` on the probe's test clock, `logHas(text)`, `play(bpm, beats)`)
 - Create: `docs/PROBE.md`
 
 **Interfaces:**
 - Consumes: Task 1's `third_party/` (the probe's Makefile points at `../third_party/mpc-vst-plugins`).
-- Produces: `make -C probe test`, `make -C probe plugin-install`, `make -C probe probe-log`, `make -C probe probe-clear`; log at `/tmp/grooveforce_probe.log` on the device.
+- Produces: `make -C probe test`, `make -C probe plugin-install`, `make -C probe probe-log`, `make -C probe probe-clear`; log at `/tmp/groovewerk_probe.log` on the device.
 
-- [ ] **Step 1: Rename the probe.** It becomes "GrooveForce Probe", uid `GfPb`, `grooveforce_probe.so`, folder `Devko - VST - GrooveForce Probe`, log `/tmp/grooveforce_probe.log`.
+- [ ] **Step 1: Rename the probe.** It becomes "GrooveWerk Probe", uid `GfPb`, `groovewerk_probe.so`, folder `Devko - VST - GrooveWerk Probe`, log `/tmp/groovewerk_probe.log`.
 
 - [ ] **Step 2: Write the failing tests** in `probe/test/probe_test.cpp`:
 
@@ -173,7 +173,7 @@ void automationIsTagged() {   // a parameter change says whether MPC was playing
 - [ ] **Step 5: Run the tests.** Run `make -C probe test`. Expected: `0 failed`.
 
 - [ ] **Step 6: Write `docs/PROBE.md`.** Include the three questions (the design's Open table, verbatim), the install line, and these device steps:
-  1. Add *GrooveForce Probe* as an insert on a drum track. Play its pads. Then play notes into the same track from a MIDI track or the Force's keys.
+  1. Add *GrooveWerk Probe* as an insert on a drum track. Play its pads. Then play notes into the same track from a MIDI track or the Force's keys.
   2. Tap Hold. Then press and hold it for about 2 s. Do the same with Tile.
   3. Record a Q-Link move of Mix into a sequence. Play it back without touching anything.
   4. `make -C probe probe-log`.
@@ -357,7 +357,7 @@ float shapeAt(int shape, double cycles);
   - Waves: Sine, Triangle, Saw Up, Saw Down, Ramp Up, Ramp Down, Square, Pulse 25.
   - Pumps, one per `kPumpCurveNames`: Pump Smooth, Pump Soft, Pump Punch, Pump Hard, Pump Snap,
     Pump Long, Pump Late, Pump Linear, Pump S-Curve, Pump Hold.
-  - Gates, from EffectForce's `Pulse::kPatternSteps` (`x` = 1, `.` = 0), without its "1/16" (all
+  - Gates, from EffectWerk's `Pulse::kPatternSteps` (`x` = 1, `.` = 0), without its "1/16" (all
     open) and "Pump": 1/8, 1/4, Offbeat, Off 16ths, Dotted, Tresillo, Gallop, Rev Gallop, Trance 1,
     Trance 2, Trance 3, Stutter, Half Bar, Build.
   - Accents, 16 levels each: Offbeat Accent (offbeat 8ths 1, other 16ths 0.45), Rolling 16ths
@@ -452,7 +452,7 @@ void transientNan() {     // a NaN or inf in the input: no onset from it, still 
 
 - [ ] **Step 2: Run them.** Run `make test-module M=transient`. Expected: fails to compile.
 
-- [ ] **Step 3: Implement** a fast and a slow envelope of the louder side, using EffectForce's
+- [ ] **Step 3: Implement** a fast and a slow envelope of the louder side, using EffectWerk's
   NEON-lane follower style (`dsp/mod.h` `EnvFollower`): fast attack 0.1 ms and release 8 ms, slow
   attack 15 ms and release 120 ms. An onset is when fast > slow × ratio and fast > −50 dBFS, after
   the holdoff. The ratio goes from 4 (sensitivity 0) to 1.4 (sensitivity 1), log-spaced. The input
@@ -471,7 +471,7 @@ void transientNan() {     // a NaN or inf in the input: no onset from it, still 
 - Test: `test/crossover_test.cpp` (`crossoverTests()`)
 
 **Interfaces:**
-- Consumes: `ef::Svf` pieces in `dsp/svf.h` (two Butterworth sections per side make a Linkwitz-Riley 4th order, as EffectForce's `comp.h` OTT does).
+- Consumes: `ef::Svf` pieces in `dsp/svf.h` (two Butterworth sections per side make a Linkwitz-Riley 4th order, as EffectWerk's `comp.h` OTT does).
 - Produces:
 
 ```cpp
@@ -582,7 +582,7 @@ void pumpBlockSizes() {     // chunks of 1, 7, 32: the same output as 32 (within
 }
 ```
 
-  The no-click rule is EffectForce's (`test/pulse_test.cpp` `noClicks`). After each change, the
+  The no-click rule is EffectWerk's (`test/pulse_test.cpp` `noClicks`). After each change, the
   steepest step in the next 0.1 s stays under `max(0.01, 1.25 × the settled steepest before and
   after)`. Copy its `steepest()` helper into `test/signal.h`.
 
@@ -762,7 +762,7 @@ void grooveGains() {        // input +6, output -6: unity; mix 0: the input bit 
 ```
 
 - [ ] **Step 2: Run them.** Expected: fails to compile.
-- [ ] **Step 3: Implement.** The fades are EffectForce's rack fades (`dsp/rack.cpp`: 10 ms, then the part skipped).
+- [ ] **Step 3: Implement.** The fades are EffectWerk's rack fades (`dsp/rack.cpp`: 10 ms, then the part skipped).
 - [ ] **Step 4: Run** `make test-module M=groove && make test && make test-arm`. Expected: `0 failed`.
 - [ ] **Step 5: Commit** — `git commit -m "The chain: buses, targets and fades for Pump and Shape"`.
 
@@ -771,10 +771,10 @@ void grooveGains() {        // input +6, output -6: unity; mix 0: the input bit 
 ### Task 11: The plugin and its pages
 
 **Files:**
-- Create: `plugin/vst2.h`, `exports.map`, `paths.{h,cpp}`, `library.{h,cpp}`, `presets.{h,cpp}`, `state.{h,cpp}`, `surface.{h,cpp}`, `trace.{h,cpp}`, `plugin.cpp` (MasterForce's, `mf` → `gf`, LEARN removed)
+- Create: `plugin/vst2.h`, `exports.map`, `paths.{h,cpp}`, `library.{h,cpp}`, `presets.{h,cpp}`, `state.{h,cpp}`, `surface.{h,cpp}`, `trace.{h,cpp}`, `plugin.cpp` (MasterWerk's, `mf` → `gf`, LEARN removed)
 - Create: `plugin/engine.{h,cpp}`, `plugin/groove_map.{h,cpp}`
 - Modify: `surface/surface.py` (the parameters and pages below)
-- Create: `test/host.h` (MasterForce's), `test/plugin_test.cpp` (`pluginTests()`)
+- Create: `test/host.h` (MasterWerk's), `test/plugin_test.cpp` (`pluginTests()`)
 
 **Interfaces:**
 - Consumes: `Groove` (Task 10); `kPumpRates`, `kShapeRates`, `kPumpCurveNames`, `numShapes` (Tasks 4, 5, 8, 9).
@@ -798,8 +798,8 @@ public:
 ```
 
   Environment variables: `GF_PRESET_ROOTS`, `GF_DATA_DIR`, `GF_FIXED_SEED`. Preset roots are
-  `Presets` in the plugin folder and `/media/AkaiForce/GrooveForce Presets`. State text starts
-  `grooveforce 1`. Trace file: `/tmp/grooveforce.trace`. `canDo` stays as MasterForce's (no MIDI
+  `Presets` in the plugin folder and `/media/AkaiForce/GrooveWerk Presets`. State text starts
+  `groovewerk 1`. Trace file: `/tmp/groovewerk.trace`. `canDo` stays as MasterWerk's (no MIDI
   until the probe says so). `groove_map.cpp` `static_assert`s every option list against the DSP's,
   as `master_map.cpp` does.
 
@@ -842,7 +842,7 @@ public:
     - **GROOVE** page: Pump and Shape as toggles, Swing with its unit, knobs.
       Q-Links: `pump_depth`, `shape_depth`, `swing`, `mix`, `output`, `pump_length`, `vol_depth`,
       `flt_depth`. Plan 2 swaps in the design's echo knobs.
-    - **PRESETS** page: MasterForce's browser.
+    - **PRESETS** page: MasterWerk's browser.
   - **PUMP+SHAPE**:
     - **PUMP** page. Q-Links: `pump_depth`, `pump_length`, `pump_curve`, `pump_rate`, `pump_push`,
       `pump_band`, `pump_xover`, `pump_mix`, then `pump_trigger`, `pump_sens`, `pump_target`,
@@ -855,7 +855,7 @@ public:
 
   The positions are the builder's within `surface.py`'s layout checks.
 
-- [ ] **Step 3: Write the failing tests** in `test/plugin_test.cpp`, after MasterForce's:
+- [ ] **Step 3: Write the failing tests** in `test/plugin_test.cpp`, after MasterWerk's:
 
 ```cpp
 void basics() {          // VSTPluginMain, 2 in / 2 out, uid 'GrFc', P_COUNT names, index 0 a readout, canDo has no MIDI
@@ -880,14 +880,14 @@ void stress() {          // 60 s of random parameter writes, transport jumps and
 
 - [ ] **Step 4: Run them.** Run `make surface && make test`. Expected: the plugin's tests fail (no plugin yet).
 
-- [ ] **Step 5: Implement** the glue, `Engine` (MasterForce's chunk loop, transport and output
-  guard), `groove_map`, and the status line (CPU, as EffectForce's).
+- [ ] **Step 5: Implement** the glue, `Engine` (MasterWerk's chunk loop, transport and output
+  guard), `groove_map`, and the status line (CPU, as EffectWerk's).
 
 - [ ] **Step 6: Build the skin** and check it. Run `make skin preview`. Expected: `surface/build/page_*.png`. Look at every page for overlap and clipped labels.
 
 - [ ] **Step 7: Run** `make test && make test-arm`. Expected: `0 failed`.
 
-- [ ] **Step 8: Commit** — `git commit -m "GrooveForce: the plugin, its pages and state"`.
+- [ ] **Step 8: Commit** — `git commit -m "GrooveWerk: the plugin, its pages and state"`.
 
 ---
 
@@ -904,7 +904,7 @@ Pump and Shape's use cases. Each preset sets only what it changes. Level-matchin
 - Create: `presets/Factory/05_Drum_Bus/01_Low_Pump.gfp`
 - Modify: `test/plugin_test.cpp` (`factoryPresets`)
 
-| Preset | Lines (after `grooveforce 1`) |
+| Preset | Lines (after `groovewerk 1`) |
 |---|---|
 | Bass Pump | `pump_on=On`, `pump_rate=1/4`, `pump_curve=Smooth`, `pump_depth=0.8`, `pump_length=0.6` |
 | Hard Pump | `pump_on=On`, `pump_curve=Hard`, `pump_depth=1`, `pump_length=0.45` |
@@ -934,8 +934,8 @@ void factoryPresets() {  // every factory preset loads through the browser; on t
 ### Task 13: Device build, bench and CI
 
 **Files:**
-- Create: `tools/reference_mix.h` (MasterForce's), `tools/bench.cpp`, `tools/pgo_train.cpp` (MasterForce's, adapted)
-- Create: `.github/workflows/build.yml` (MasterForce's: `--expect-id grooveforce --expect-repo Devko/GrooveForce`, artifact `GrooveForce-mpc-armv7`)
+- Create: `tools/reference_mix.h` (MasterWerk's), `tools/bench.cpp`, `tools/pgo_train.cpp` (MasterWerk's, adapted)
+- Create: `.github/workflows/build.yml` (MasterWerk's: `--expect-id groovewerk --expect-repo Devko/GrooveWerk`, artifact `GrooveWerk-mpc-armv7`)
 - Create: `CHANGELOG.md` (`## Unreleased`), `docs/PERFORMANCE.md`
 - Modify: `README.md` (what works now, building, the install line, "preview: Pump and Shape")
 
@@ -959,7 +959,7 @@ void factoryPresets() {  // every factory preset loads through the browser; on t
   Run (in WSL, as a login shell): `make arm-plugin && make test-arm-pgo && make bench`
   Expected: `profile-guided build`, `exported symbols: 1`, the suite `0 failed`, the bench prints every case.
 
-- [ ] **Step 4: Package.** Run `make plugin-package`. Expected: `dist/GrooveForce-0.0.1-mpc-armv7.zip`. Then run `python3 third_party/mpc-vst-plugins/tools/catalog_check.py dist/GrooveForce-0.0.1-mpc-armv7.zip --expect-id grooveforce`. Expected: OK (a local glibc warning is fine; CI's build is the release one).
+- [ ] **Step 4: Package.** Run `make plugin-package`. Expected: `dist/GrooveWerk-0.0.1-mpc-armv7.zip`. Then run `python3 third_party/mpc-vst-plugins/tools/catalog_check.py dist/GrooveWerk-0.0.1-mpc-armv7.zip --expect-id groovewerk`. Expected: OK (a local glibc warning is fine; CI's build is the release one).
 
 - [ ] **Step 5: Commit**, then push on the user's go-ahead (CI runs on push). Commit: `git commit -m "Device build, bench, PGO and CI"`.
   Expected on push: both CI jobs green, with the zip as an artifact.
@@ -973,7 +973,7 @@ first, use a WSL login shell (`bash -l`), and use `ssh -o BatchMode=yes`. The Fo
 DHCP, so ask the user for it.
 
 **Files:**
-- Create: `local.mk` (ignored: `FORCE = root@<ip>`, `SSH_KEY = $(HOME)/.ssh/mockba_force`, `PY = $(HOME)/.venvs/rackforce/bin/python`)
+- Create: `local.mk` (ignored: `FORCE = root@<ip>`, `SSH_KEY = $(HOME)/.ssh/mockba_force`, `PY = $(HOME)/.venvs/rackwerk/bin/python`)
 - Modify: `docs/PERFORMANCE.md` (the device numbers), `docs/DESIGN.md` (nothing unless the device disagrees with it)
 
 - [ ] **Step 1: Bench on the device.** Run `make bench-device`. Expected: Both heaviest p99 ≤ 2.4% (Pump 0.8 + Shape 1 + overhead 0.6); Four instances about four times that. Record the table in `docs/PERFORMANCE.md`.
@@ -992,4 +992,4 @@ DHCP, so ask the user for it.
 
   Fix what they hear, with a test for each fix, and write down what they say.
 
-- [ ] **Step 4: Commit** — `git commit -m "Docs: GrooveForce on the Force, Pump and Shape"`.
+- [ ] **Step 4: Commit** — `git commit -m "Docs: GrooveWerk on the Force, Pump and Shape"`.

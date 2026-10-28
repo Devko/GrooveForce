@@ -2,7 +2,7 @@
 // Moves (docs/DESIGN.md, "Moves"): Flex Beat's pads on the Force. A Move is a named one-tap action on the grid that
 // drives several parts at once over its length, then returns: a Time pattern, up to four parameter ramps on top of the
 // knobs, and the parts it switches on. The sixteen factory Moves are data (surface/surface.py MOVES, checked there,
-// written to build/move_data.h) in the order of the MOVES page's tiles. This is EffectForce's scene moves put on the
+// written to build/move_data.h) in the order of the MOVES page's tiles. This is EffectWerk's scene moves put on the
 // grid's pads: a ramp is a change of a parameter's value relative to where the knob is, and back at the end.
 //
 // The plugin's engine sees a tile pressed, GO pressed or the Move parameter changed and calls fire() on the audio

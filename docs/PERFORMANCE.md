@@ -11,7 +11,7 @@
 ## The budget
 
 MPC renders 128-frame blocks: **2902 µs per block**, per plugin instance. A plugin passes at
-**p99 ≤ 15%** of the block (warns up to 35%). GrooveForce's ceiling is **every part on at its
+**p99 ≤ 15%** of the block (warns up to 35%). GrooveWerk's ceiling is **every part on at its
 heaviest**, what the worst preset could reach: four Echo lines in a Ring with in-loop filters, drive
 and modulators, three Shape lanes and a banded Pump on the Input trigger acting on both buses (the dry
 and the Echo's wet), and Time playing a Move. Usually it sits on several tracks at once, one copy
@@ -123,7 +123,7 @@ sixteen, Spin-Back going round, is a little over (avg 43.3k, p99 63.9k: 1.8 at m
 
 ## Instruction counts
 
-Without the device, ARM instructions per 128-frame block are the measure, as for EffectForce:
+Without the device, ARM instructions per 128-frame block are the measure, as for EffectWerk:
 `make bench-count` builds the plain `.so` (the device flags, no profile, unstripped, with `-g`), the ARM
 bench and tools/gfcount.c, a qemu TCG plugin, and runs the bench with `-m` under a plugin-enabled
 qemu-arm (`QEMU_PLUGINS`, and `QEMU_PLUGIN_INCLUDE` for the folder with its `qemu-plugin.h`, the 8.2
@@ -137,7 +137,7 @@ measured calls (`vaddr insns execs`), and the log, build/arm/count/log.txt, has 
 address less `BASE` is the `.so`'s, for `arm-linux-gnueabihf-addr2line` (or `objdump -dl`, which gives the
 instructions with their lines). The four instances' count is the sum of the four calls.
 
-EffectForce's rule of thumb is about 36k-44k instructions to a point of the block on the Force. Plan 1's
+EffectWerk's rule of thumb is about 36k-44k instructions to a point of the block on the Force. Plan 1's
 device run bears it out for the p99 (Pump 44.8k for 1.08, Shape 40.3k for 1.15, both 73.8k for 1.93: 35k-42k
 to a point; the device average runs 49k-57k a point). That sets today's counts, plan 2's build (case 0, the
 plugin's own 11.8k, now has plan 2's engine in it), against plan 1's device times. The counts miss what the device adds (cache misses, VFP
@@ -227,7 +227,7 @@ two resets (the tempo's, the pattern's) 14 and 26 of its 30 cases fail.
 - **NEON where the work is parallel:** left and right run as two lanes of one vector in the state-variable
   filters (the Shape's filter lane, the Pump's crossover, the Echo's lines) and in the playhead's Hermite
   reads; the crossover is three filters, not four.
-- **No libm and no 64-bit conversions per sample:** EffectForce's fast math (`dsp/fastmath.h`), per-chunk
+- **No libm and no 64-bit conversions per sample:** EffectWerk's fast math (`dsp/fastmath.h`), per-chunk
   coefficients, a table for the crossfade's cosine, ring indices in 32 bits; the tan behind a cutoff is
   worked out once per chunk at most.
 - **Settled is free:** a level that isn't moving and sits at unity is not touched.

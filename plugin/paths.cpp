@@ -61,7 +61,7 @@ std::string pluginDir() {
     return dir;
 }
 
-std::vector<Root> presetRoots() { return roots("GF_PRESET_ROOTS", "Presets", "/media/AkaiForce/GrooveForce Presets"); }
+std::vector<Root> presetRoots() { return roots("GF_PRESET_ROOTS", "Presets", "/media/AkaiForce/GrooveWerk Presets"); }
 
 std::string dataDir() {
     if (const char* e = std::getenv("GF_DATA_DIR")) return e;

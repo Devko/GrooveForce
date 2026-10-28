@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GrooveForce touchscreen surface: the ONE place the plugin's parameters and pages are defined.
+"""GrooveWerk touchscreen surface: the ONE place the plugin's parameters and pages are defined.
 
 Writes, next to this file:
   params.json        ordered VST parameter list (index = position; append-only once released:
@@ -25,7 +25,7 @@ disagree.
 
 Before writing anything the layout is checked the way shadow_skin.py would, plus geometry and the
 parameter names MPC shows, so a broken page fails here instead of on the device. The layout
-machinery and its checks are MasterForce's, which has them from EffectForce (PolyForce's), with two
+machinery and its checks are MasterWerk's, which has them from EffectWerk (PolyWerk's), with two
 more: at most five page groups, and every option text of a popup or a segment group fits where it is drawn.
 
 Run: python3 surface/surface.py   (make surface does this)
@@ -43,8 +43,8 @@ STEPPER_RANGE = 1023        # the preset stepper's VST range: 0..1023 items (ste
 BROWSER_CATS = 16           # category tiles on the browser page (2 x 8)
 BROWSER_ITEMS = 24          # preset tiles (3 x 8)
 
-VST = {"name": "GrooveForce", "vendor": "Devko", "uid": "GrFc", "version": 1000,
-       "so": "grooveforce.so", "params": "params.json", "layout": "layout.conf", "effect": True}
+VST = {"name": "GrooveWerk", "vendor": "Devko", "uid": "GrFc", "version": 1000,
+       "so": "groovewerk.so", "params": "params.json", "layout": "layout.conf", "effect": True}
 
 
 # --- parameters ------------------------------------------------------------------------------
@@ -166,8 +166,8 @@ def params_json():
 
 
 # --- touchscreen pages -------------------------------------------------------------------------
-# EffectForce's look (PolyForce's td3 rounded cards on one flat colour; bg and box the same, so the opaque image of
-# a control never shows a box behind it), in MasterForce's coral. Plugin area 1280x628 at y = 86..714. Every page: a
+# EffectWerk's look (PolyWerk's td3 rounded cards on one flat colour; bg and box the same, so the opaque image of
+# a control never shows a box behind it), in MasterWerk's coral. Plugin area 1280x628 at y = 86..714. Every page: a
 # header row (the status line from x=24; the preset stepper right-aligned to x=1256), then cards at y=158 and y=440
 # (h=270) or one full-height card (h=552). Nothing may sit in a card's title band (y .. y+44: td3 draws the title
 # rule at y+38). skin_polish.py (run by `make skin` after the generator) redraws the knob strips, the trigger
@@ -1030,7 +1030,7 @@ def _defines(values):
 
 
 def check_preset_sound(where, values):
-    """What a factory preset's lines say together, beyond each line on its own (EffectForce's rules, GrooveForce's
+    """What a factory preset's lines say together, beyond each line on its own (EffectWerk's rules, GrooveWerk's
     parts). Nothing is set on a part, a Shape lane or an Echo line the preset leaves off (a lane's or a line's switch
     included), unless the Move it selects switches that on; a Move's mode and quantize go with a selected Move. What
     defines each part that is on is stated (_defines, R56). A selected Move needs Time on: every factory preset with Moves
@@ -1111,8 +1111,8 @@ def factory_presets():
             where = "%s/%s" % (d, f)
             text = open(os.path.join(folder, f), encoding="utf-8").read().replace("\r\n", "\n")
             lines = text.split("\n")
-            if not lines[0].startswith("grooveforce "):
-                errors.append("%s: no 'grooveforce N' header" % where)
+            if not lines[0].startswith("groovewerk "):
+                errors.append("%s: no 'groovewerk N' header" % where)
             seen_keys, values = {}, {}
             for n, line in enumerate(lines[1:], 2):
                 if not line.strip():
@@ -1182,7 +1182,7 @@ SHAPE_SEGS = ("linear", "smooth", "hold", "curve")
 SHAPE_KINDS = ("points", "steps", "pump", "random_steps", "random_smooth")
 HARD_EDGE = 0.9999          # a saw or ramp ends on a last point held to the wrap: a hard edge, as the square's
 
-# EffectForce's gate patterns (Pulse::kPatternSteps; 'x' open, '.' closed) except "1/16" (all open) and "Pump".
+# EffectWerk's gate patterns (Pulse::kPatternSteps; 'x' open, '.' closed) except "1/16" (all open) and "Pump".
 GATES = [
     ("1/8", "x.x.x.x.x.x.x.x."), ("1/4", "x...x...x...x..."), ("Offbeat", "..x...x...x...x."),
     ("Off 16ths", ".x.x.x.x.x.x.x.x"), ("Dotted", "x..x..x..x..x..x"), ("Tresillo", "x..x..x.x..x..x."),

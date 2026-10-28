@@ -1,11 +1,11 @@
 #pragma once
-// Where GrooveForce finds its files on the device, with test overrides.
+// Where GrooveWerk finds its files on the device, with test overrides.
 //
-//   pluginDir()   the folder our own .so was loaded from ("/sdcard/Synths/Devko - VST - GrooveForce"),
+//   pluginDir()   the folder our own .so was loaded from ("/sdcard/Synths/Devko - VST - GrooveWerk"),
 //                 read from /proc/self/maps (the mapping that holds this code). Not dladdr(): built
 //                 against glibc >= 2.34 that binds GLIBC_2.34. "" when it can't tell (tests).
 //   presetRoots() preset folders, in order: <plugin dir>/Presets ("plugin"), then the SSD
-//                 /media/AkaiForce/GrooveForce Presets ("ssd"). A missing folder simply contributes
+//                 /media/AkaiForce/GrooveWerk Presets ("ssd"). A missing folder simply contributes
 //                 nothing. GF_PRESET_ROOTS (colon-separated) replaces both.
 //   dataDir()     the presets' favorites and recent lists: the plugin folder. GF_DATA_DIR
 //                 overrides; "" = nothing is persisted. User presets go to the first preset root.

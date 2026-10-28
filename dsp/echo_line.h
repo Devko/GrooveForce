@@ -1,5 +1,5 @@
 #pragma once
-// EchoLine (docs/DESIGN.md, "Echo"): one of the Echo's four lines. EffectForce's Delay (dsp/delay.h)
+// EchoLine (docs/DESIGN.md, "Echo"): one of the Echo's four lines. EffectWerk's Delay (dsp/delay.h)
 // taken apart: the same stereo line (double-precision time, Tape and Fade glides, a cubic drive, the
 // limiter, wow, Hermite reads, the cheap reset), but with the Echo's filter instead of its two cuts and
 // its process() split in two, so that a routing can wire the lines to each other.
@@ -91,7 +91,7 @@
 namespace gf {
 
 // The sync divisions the Echo offers, in quarter-note beats, shortest first: a Q-Link turn walks them in
-// order. EffectForce's 16 plus 5/16, 7/16 and 5/8 (the polyrhythm times; 3/16 is already there as the
+// order. EffectWerk's 16 plus 5/16, 7/16 and 5/8 (the polyrhythm times; 3/16 is already there as the
 // dotted 1/8, 3/8 as the dotted 1/4).
 inline constexpr ef::Division kEchoDivs[] = {   // sorted by length: a Q-Link turn walks them in order (R27)
     {"1/64", 0.0625}, {"1/32T", 1.0 / 12}, {"1/32", 0.125}, {"1/16T", 1.0 / 6}, {"1/16", 0.25}, {"1/8T", 1.0 / 3},

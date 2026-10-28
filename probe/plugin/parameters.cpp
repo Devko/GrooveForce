@@ -11,7 +11,7 @@ namespace ef {
 
 namespace {
 
-constexpr char kStateMagic[] = "grooveforce-probe 1";
+constexpr char kStateMagic[] = "groovewerk-probe 1";
 
 bool valid(int id) { return id >= 0 && id < P_COUNT; }
 

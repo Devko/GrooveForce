@@ -3,7 +3,7 @@
 // recorder ring holds the last 6 s or more of the input and the output is read from a playhead that is at
 // now or behind it, never ahead, so nothing is delayed: a pattern that seems to need the future (double
 // speed) plays a captured slice twice instead. The ring, the 4-point Hermite reads, the 5 ms raised-cosine
-// crossfade and the level that fades with the speed are EffectForce's looper's (looper.cpp), put to a
+// crossfade and the level that fades with the speed are EffectWerk's looper's (looper.cpp), put to a
 // different use: its heads follow a pattern's curve instead of a loop's edges.
 //
 // The playhead. It reads `lag` beats behind now (a lag of 0 is the input itself). A pattern says where it

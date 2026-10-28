@@ -1,14 +1,14 @@
-# GrooveForce plan 2: Echo, Time and Moves, presets
+# GrooveWerk plan 2: Echo, Time and Moves, presets
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Everything the approved design still has open. That is the Echo (Sigmund-style, four lines), Time (swing and grooves on audio, Flex Beat-style patterns) and Moves (16 one-tap actions), plus the factory presets by job, level-matched, and the docs that make it 0.0.1-ready. The fixes and follow-ups plan 1 left open go in too.
 
 **Architecture:** New DSP lives in `dsp/` with the module contract.
-- **Echo** is four `EchoLine`s (EffectForce's Delay grown a filter, a modulator and a read/write split, so the lines can feed each other) wired by a routing.
+- **Echo** is four `EchoLine`s (EffectWerk's Delay grown a filter, a modulator and a read/write split, so the lines can feed each other) wired by a routing.
 - **Time** is a recorder ring and a playhead that never runs ahead of now. Its patterns are data in `surface.py`, as the shapes are.
 - **The chain** (`Groove`) gains a live wet bus, the Echo's order, Time's place and the key that Pump listens to.
-- **Moves** live in the plugin (`plugin/moves.*`). They are parameter ramps plus a Time pattern, fired on the grid by tiles or by the automatable Move parameter, and played in the Engine on the parameters' 0..1 values (EffectForce's scene moves).
+- **Moves** live in the plugin (`plugin/moves.*`). They are parameter ramps plus a Time pattern, fired on the grid by tiles or by the automatable Move parameter, and played in the Engine on the parameters' 0..1 values (EffectWerk's scene moves).
 
 **Tech Stack:** As plan 1: C++17, the siblings' VST2 glue, Python 3 (`surface.py`; Pillow for the skin), GNU make in WSL, qemu-arm, GitHub Actions.
 
@@ -21,14 +21,14 @@ The user asked to "do all at once, implement all that is open", 2026-10-26. Thes
 - **R24, Moves without the probe.** The device probe hasn't run. Moves get **One Shot** and **Loop**. **Hold** and MIDI-triggered Moves and Pump wait for the probe's answers (design, Open). The Move parameter is automatable either way.
 - **R25, swing on audio** (the design's second "Your part", handed over). **Jump and crossfade**: the playhead jumps back by the swing delay at the late 16th's straight line, and forward again at the next pair's line. Each jump is a 5 ms raised-cosine crossfade that *ends on* the grid line, so a hit on the line is never heard early. No pitch bend.
 - **R26, the key.** The Pump's Input trigger always listens to the chain's input (after the input gain, before any part), whatever the Pump's target. Rumble (Pump on Echo, Input) hears the dry kick, not the echo it ducks.
-- **R27, polyrhythm times.** "3/16" and "3/8" are already EffectForce's "1/8." and "1/4.". The Echo's list adds 5/16, 7/16 and 5/8, sorted by length.
+- **R27, polyrhythm times.** "3/16" and "3/8" are already EffectWerk's "1/8." and "1/4.". The Echo's list adds 5/16, 7/16 and 5/8, sorted by length.
 - **R28, tile order.** The 16 Move tiles hold the 16 factory Moves in a fixed order. Picking the selected Move, its mode and its quantize is saved in a preset. Re-ordering tiles waits.
 - **R29, dry level.** "Break" (the dry drops out, the echo rings) needs a Dry level. A `dry` parameter (0..1, default 1) on SETUP scales the dry bus, and Moves can ramp it.
 - **R30, the same parallel waves as plan 1.** A task starts when its dependencies are implemented, in its own worktree. Its own review gates its merge.
 
 ## Global Constraints (in addition to plan 1's, which all hold)
 
-- **Echo:** four lines A-D, each stereo, each holding 1 bar at 80 BPM (3 s) plus the wow's depth. The minimum time is 1 ms, more than a 32-sample chunk, so lines can read all their outputs before writing any input (Ring). Every gain in the loop is ≤ 1 and the in-loop limiter keeps writes under 0 dBFS, so feedback 1 holds and never runs away. Lines are allocated the first time the Echo is switched on (UI thread, handed over through an atomic pointer, as EffectForce's looper does). Until then the Echo passes nothing and costs nothing.
+- **Echo:** four lines A-D, each stereo, each holding 1 bar at 80 BPM (3 s) plus the wow's depth. The minimum time is 1 ms, more than a 32-sample chunk, so lines can read all their outputs before writing any input (Ring). Every gain in the loop is ≤ 1 and the in-loop limiter keeps writes under 0 dBFS, so feedback 1 holds and never runs away. Lines are allocated the first time the Echo is switched on (UI thread, handed over through an atomic pointer, as EffectWerk's looper does). Until then the Echo passes nothing and costs nothing.
 - **Time:** zero latency. The playhead reads at or behind now, never ahead. Every jump is a 5 ms raised-cosine crossfade that ends on its grid line. The ring holds 2 bars at 80 BPM (6 s) and is allocated lazily like the Echo's lines. Time on with Groove Off and no pattern passes its input bit for bit (it only records).
 - **Swing once** (design, "combining" 4, the plan 1 ledger's ruling): `Groove::stepSwing` returns straight (0.5) for Shape's and Pump's steps when Time is on, its Groove is Swing and its place is Post. Otherwise it returns the global Swing.
 - **All on two buses:** with the wet sounding, a part aimed at All acts on the dry and the wet identically (as if on their sum). Echo-targeted parts act on the wet only.
@@ -83,7 +83,7 @@ The user asked to "do all at once, implement all that is open", 2026-10-26. Thes
 - Test: `test/echo_line_test.cpp` (`echoLineTests()`)
 
 **Interfaces:**
-- Consumes: EffectForce's `dsp/delay.{h,cpp}` (D:\DEV\EffectForce, read-only) as the starting point: Tape/Fade glide, the cubic drive, the limiter, wow, Hermite reads, the cheap reset. Also `dsp/svf.h`.
+- Consumes: EffectWerk's `dsp/delay.{h,cpp}` (D:\DEV\EffectWerk, read-only) as the starting point: Tape/Fade glide, the cubic drive, the limiter, wow, Hermite reads, the cheap reset. Also `dsp/svf.h`.
 - Produces:
 
 ```cpp
@@ -126,7 +126,7 @@ The loop, per side:
 - **Write:** `input + feedback × (In loop: the filtered read; On output: the plain read) → drive → limiter → buffer`.
 - **On output:** the filter shapes only what is heard.
 - **Always in the loop:** a fixed one-pole low cut at 30 Hz.
-- **Ping-Pong:** the mono sum of the input enters L only; L's read feeds R's write and R's feeds L's, as EffectForce's.
+- **Ping-Pong:** the mono sum of the input enters L only; L's read feeds R's write and R's feeds L's, as EffectWerk's.
 
 - [ ] **Step 1: Failing tests.**
 
@@ -154,7 +154,7 @@ void lineNan() {         // NaN in the input: finite output, the loop never take
 ```
 
 - [ ] **Step 2: Run them.** Run `make test-module M=echo_line` (add `MOD_DEPS_echo_line` to the Makefile). Expected: fails to compile.
-- [ ] **Step 3: Implement.** Start from EffectForce's Delay. Replace its two one-pole cuts with the SVF filter and the fixed 30 Hz low cut. Split process into `read` and `write`, and drop its ducking (that becomes the Echo's).
+- [ ] **Step 3: Implement.** Start from EffectWerk's Delay. Replace its two one-pole cuts with the SVF filter and the fixed 30 Hz low cut. Split process into `read` and `write`, and drop its ducking (that becomes the Echo's).
 - [ ] **Step 4: Run** `make test-module M=echo_line && make test && make test-arm`. Expected: `0 failed`.
 - [ ] **Step 5: Commit** — `Echo: one line, read and write apart`.
 
@@ -167,7 +167,7 @@ void lineNan() {         // NaN in the input: finite output, the loop never take
 - Test: `test/echo_mod_test.cpp` (`echoModTests()`)
 
 **Interfaces:**
-- Consumes: `shapeAt` (dsp/shapes.h), `TransientDetector` (dsp/transient.h), `toStraight` and `Swing` (dsp/grid.h). Also EffectForce's `EnvFollower` (D:\DEV\EffectForce\dsp\mod.h) for Follow.
+- Consumes: `shapeAt` (dsp/shapes.h), `TransientDetector` (dsp/transient.h), `toStraight` and `Swing` (dsp/grid.h). Also EffectWerk's `EnvFollower` (D:\DEV\EffectWerk\dsp\mod.h) for Follow.
 - Produces:
 
 ```cpp
@@ -203,7 +203,7 @@ public:
 - Test: `test/time_test.cpp` (`timeTests()`)
 
 **Interfaces:**
-- Consumes: EffectForce's looper (D:\DEV\EffectForce\dsp\looper.{h,cpp}, read-only) for the ring, Hermite reads, the 5 ms raised-cosine crossfade with the old head playing past the edge, and the level fading with speed.
+- Consumes: EffectWerk's looper (D:\DEV\EffectWerk\dsp\looper.{h,cpp}, read-only) for the ring, Hermite reads, the 5 ms raised-cosine crossfade with the old head playing past the edge, and the level fading with speed.
 - Produces:
 
 ```cpp
@@ -296,8 +296,8 @@ void timeAllocate() {      // before allocate(): input passes through untouched,
 ### Task 5: Level-matching tools
 
 **Files:**
-- Create: `tools/levels.cpp` (EffectForce's tools/levels.cpp and tools/loudness.h, adapted)
-- Modify: `tools/reference_mix.h` (the parts by category; drop MasterForce's notes and the `efl` namespace for `gfl`), Makefile (`levels`, `preset-levels`, as EffectForce's)
+- Create: `tools/levels.cpp` (EffectWerk's tools/levels.cpp and tools/loudness.h, adapted)
+- Modify: `tools/reference_mix.h` (the parts by category; drop MasterWerk's notes and the `efl` namespace for `gfl`), Makefile (`levels`, `preset-levels`, as EffectWerk's)
 - Test: `make levels` on the current 10 presets
 
 The reference material by category is the same four bars at 120 BPM throughout, at -18 LUFS:
@@ -347,7 +347,7 @@ public:
         Line line[kLines];
         int routing = kParallel;
         float send = 1.0f;          // 0..1: the input into the lines
-        float duck = 0.0f;          // 0..1: the wet ducks under the key (EffectForce's law)
+        float duck = 0.0f;          // 0..1: the wet ducks under the key (EffectWerk's law)
         bool freeze = false;        // feedback to 1 and the send closed, glided 20 ms
         int glide = EchoLine::kTape;
         float width = 1.0f;         // 0..1.5: M/S width of the wet
@@ -655,7 +655,7 @@ Groups: GROOVE, PUMP+SHAPE, ECHO, TIME, SETUP (five).
 - [ ] **Step 2: Run them.** Expected: fail.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** `make test && make test-arm && make arm-plugin && make test-arm-pgo`. Expected: `0 failed`, profile-guided, 1 export.
-- [ ] **Step 5: Commit** — `GrooveForce: Echo, Time and Moves through the plugin`.
+- [ ] **Step 5: Commit** — `GrooveWerk: Echo, Time and Moves through the plugin`.
 
 ---
 
@@ -706,7 +706,7 @@ Each preset sets only what it changes. `make preset-levels` sets every Output, a
 ### Task 14: Docs for 0.0.1
 
 **Files:**
-- Create: `docs/USER_GUIDE.md` (EffectForce's style: the pages, every part, swing, Moves, presets, the limits — the Input trigger's, the banded split's peaks)
+- Create: `docs/USER_GUIDE.md` (EffectWerk's style: the pages, every part, swing, Moves, presets, the limits — the Input trigger's, the banded split's peaks)
 - Modify:
   - `README.md` (what works, building, installing)
   - `CHANGELOG.md` (`## 0.0.1`)

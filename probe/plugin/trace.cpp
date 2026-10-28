@@ -25,7 +25,7 @@ std::string traceDir() {
 
 void trace(const char* fmt, ...) {
     std::lock_guard<std::mutex> lk(mtx);
-    const std::string path = traceDir() + "/grooveforce_probe.log";
+    const std::string path = traceDir() + "/groovewerk_probe.log";
     if (!logFile) logFile = std::fopen(path.c_str(), "a");
     if (logFile && std::ftell(logFile) > kMaxBytes) {
         std::fclose(logFile);

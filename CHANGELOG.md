@@ -4,6 +4,15 @@ Releases are built by CI from a `vX.Y.Z` tag ([`.github/workflows/build.yml`](.g
 the section for the tag's version becomes the release's notes. While the version is 0.x the parameter
 list may still change between releases.
 
+## Unreleased: GrooveForce is now GrooveWerk <!-- werk-rename: keep -->
+
+**A new name, the same groove.** "Force" is the name of Akai's device, so it no longer belongs in this
+plugin's name. Nothing about the sound changes.
+
+- MPC's plugin list shows **GrooveWerk**, and the plugin lives in `/sdcard/Synths/Devko - VST - GrooveWerk`.
+- Your presets, favorites and recents move over by themselves: the installer carries them out of the old `Devko - VST - GrooveForce` folder and removes it, and the first start renames `/media/AkaiForce/GrooveForce Presets` to `GrooveWerk Presets`. <!-- werk-rename: keep -->
+- Projects saved with GrooveForce open with GrooveWerk and their settings: the plugin keeps GrooveForce's plugin ID, and it reads presets and projects saved under the old name (the same way checked with SubWerk on a Force). <!-- werk-rename: keep -->
+
 ## 0.0.2
 
 - **Echo: every routing closes over the lines that are on**, as the Ring already did. A line whose

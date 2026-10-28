@@ -1,5 +1,5 @@
 #pragma once
-// Echo (docs/DESIGN.md, "Echo"): Sigmund 2's depth on EffectForce's delay. Four stereo lines, A to D
+// Echo (docs/DESIGN.md, "Echo"): Sigmund 2's depth on EffectWerk's delay. Four stereo lines, A to D
 // (dsp/echo_line.h), each with a modulator of its own (dsp/echo_mod.h), wired by one of five routings
 // and heard at a level and pan each. The Echo makes the wet bus; the chain (Groove, plan 2) adds it to
 // the dry, ducks, shapes and pumps it as its target says.
@@ -69,7 +69,7 @@
 // The Echo's controls:
 //   send          the input into the lines, 0..1 (a gain, slewed). Only the first line of a routing that is on
 //                 hears it, or all four in Parallel, or the first of each pair in Pairs (R63).
-//   duck          the wet ducks under the KEY with EffectForce's law: the key's louder side (up to +18 dBFS)
+//   duck          the wet ducks under the KEY with EffectWerk's law: the key's louder side (up to +18 dBFS)
 //                 through a 5 ms attack, 250 ms release envelope, gain 1 / (1 + 16 duck env): at duck 1,
 //                 -6 dB with the key at -24 dBFS, -19 dB at -6 dBFS. Only the heard wet ducks, not the lines,
 //                 so the repeats bloom in the gaps. The gain is worked out once a chunk and slewed.
@@ -89,7 +89,7 @@
 //
 // Memory: allocate() (UI thread; the plugin calls it the first time the Echo is switched on) makes all
 // four lines (about 4.2 MB, 1 bar at 80 BPM and the wow's depth, stereo, each) and hands them over through
-// an atomic pointer, as EffectForce's looper does: the audio thread takes the pointer at its next set(),
+// an atomic pointer, as EffectWerk's looper does: the audio thread takes the pointer at its next set(),
 // and never touches a line before. Until then the wet is silent, nothing is read or written, and
 // running() is 0. (All four, not the ones that are on: the call has no parameters, and a line switched
 // on later must not wait for memory.) Lines taken up this way fade in over 10 ms like any line.
@@ -132,7 +132,7 @@ public:
         Line line[kLines];
         int routing = kParallel;
         float send = 1.0f;          // 0..1: the input into the lines
-        float duck = 0.0f;          // 0..1: the wet ducks under the key (EffectForce's law)
+        float duck = 0.0f;          // 0..1: the wet ducks under the key (EffectWerk's law)
         bool freeze = false;        // feedback to 1 (every line's, or in a Ring its send round the ring) and the send closed, glided 20 ms
         int glide = EchoLine::kTape;
         float width = 1.0f;         // 0..1.5: M/S width of the wet

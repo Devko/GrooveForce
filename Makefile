@@ -1,8 +1,8 @@
-# GrooveForce: a groove insert effect for MPC OS (Force / MPC standalone).
+# GrooveWerk: a groove insert effect for MPC OS (Force / MPC standalone).
 # Builds on Linux or WSL. Native: g++ (tests, x86 bench). Device: arm-linux-gnueabihf-g++ 11
 # or newer (libstdc++ is linked dynamically; MPC OS has it). Releases come from CI, built against glibc 2.31
 # so they load on MPC OS 2.x and 3.x; a newer distribution's cross toolchain needs a newer glibc (3.x only).
-# Your own settings (FORCE, SSH_KEY, PY) go in local.mk, which git ignores. (MasterForce's, EffectForce's before it.)
+# Your own settings (FORCE, SSH_KEY, PY) go in local.mk, which git ignores. (MasterWerk's, EffectWerk's before it.)
 -include local.mk
 
 CXX      ?= g++
@@ -33,7 +33,7 @@ SSH      := ssh -n $(SSH_OPTS)
 MV       := third_party/mpc-vst-plugins
 SURF     := surface
 SURF_OUT := $(SURF)/build
-SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveForce
+SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveWerk
 GEN      := $(SURF_OUT)/param_ids.h $(SURF_OUT)/factory_presets.h $(SURF_OUT)/shape_data.h $(SURF_OUT)/time_data.h $(SURF_OUT)/move_data.h
 SKIN     := $(SURF_OUT)/skin.stamp
 
@@ -48,7 +48,7 @@ THDR     := $(wildcard test/*.h)
 # (every stage drops NaNs with it).
 ARM_OPT  := -O3 -march=armv7-a -mtune=cortex-a17 -mfpu=neon-vfpv4 -mfloat-abi=hard \
             -funsafe-math-optimizations -fno-math-errno -fno-tree-loop-distribute-patterns
-ARM_SO   := $(BUILD)/arm/grooveforce.so
+ARM_SO   := $(BUILD)/arm/groovewerk.so
 ARM_BENCH := $(BUILD)/arm/gfbench
 
 .PHONY: all surface skin preview test test-arm test-arm-pgo test-module test-module-arm bench arm-plugin arm-bench \
@@ -110,7 +110,7 @@ $(BUILD)/arm/gf_test: $(TESTS) $(THDR) $(SRC) $(HDR) $(GEN)
 
 # One module's tests on their own: make test-module M=grid builds
 # test/grid_test.cpp with dsp/grid.cpp (if there is one), under ASan/UBSan; test-module-arm
-# the same for the Force's CPU under qemu-arm. (EffectForce's.) A module that calls another's code
+# the same for the Force's CPU under qemu-arm. (EffectWerk's.) A module that calls another's code
 # (shapes evaluates the Pump curves) lists that code in MOD_DEPS_<module>; the generated headers
 # (shape_data.h) come from INC, and from make surface.
 M ?=
@@ -137,10 +137,10 @@ test-module-arm: $(GEN)
 	$(ARM_RUN) $(BUILD)/arm/$(M)_test
 
 # x86 numbers say nothing about the Force; this only checks the bench and the .so path work.
-bench: $(BUILD)/grooveforce.so $(BUILD)/gfbench
-	$(BUILD)/gfbench $(BUILD)/grooveforce.so -s 1 -c -1
+bench: $(BUILD)/groovewerk.so $(BUILD)/gfbench
+	$(BUILD)/gfbench $(BUILD)/groovewerk.so -s 1 -c -1
 
-$(BUILD)/grooveforce.so: $(SRC) $(HDR) $(GEN) plugin/exports.map | $(BUILD)
+$(BUILD)/groovewerk.so: $(SRC) $(HDR) $(GEN) plugin/exports.map | $(BUILD)
 	$(CXX) -std=c++17 -O3 -fno-tree-loop-distribute-patterns -fPIC -fvisibility=hidden -fno-gnu-unique -Wall -Wextra -pthread \
 		$(INC) -shared -Wl,--no-undefined -Wl,--version-script=plugin/exports.map $(SRC) -o $@
 
@@ -152,10 +152,10 @@ $(BUILD)/gfbench: tools/bench.cpp tools/cases.h $(HDR) $(GEN) | $(BUILD)
 # `levels` reports, `preset-levels` writes the presets' output= lines and regenerates.
 $(BUILD)/gflevels: tools/levels.cpp tools/reference_mix.h plugin/vst2.h | $(BUILD)
 	$(CXX) -std=c++17 -O2 -Wall -Wextra $< -ldl -o $@
-levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
-	$(BUILD)/gflevels $(BUILD)/grooveforce.so presets/Factory
-preset-levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
-	$(BUILD)/gflevels $(BUILD)/grooveforce.so presets/Factory --write
+levels: $(BUILD)/groovewerk.so $(BUILD)/gflevels
+	$(BUILD)/gflevels $(BUILD)/groovewerk.so presets/Factory
+preset-levels: $(BUILD)/groovewerk.so $(BUILD)/gflevels
+	$(BUILD)/gflevels $(BUILD)/groovewerk.so presets/Factory --write
 	python3 $(SURF)/surface.py
 
 # --- device -----------------------------------------------------------------------------------
@@ -163,7 +163,7 @@ preset-levels: $(BUILD)/grooveforce.so $(BUILD)/gflevels
 # instantiations and typeinfo -fvisibility leaves; -fno-gnu-unique keeps it unloadable);
 # --no-undefined because an unresolved symbol otherwise only shows up as MPC crashing on load.
 ARM_SO_FLAGS = -std=c++17 $(ARM_OPT) -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -fno-gnu-unique -Wall -Wextra -Wno-psabi -pthread $(INC)
-ARM_SO_LINK  = -shared -Wl,--no-undefined -Wl,-soname,grooveforce.so -Wl,--version-script=plugin/exports.map
+ARM_SO_LINK  = -shared -Wl,--no-undefined -Wl,-soname,groovewerk.so -Wl,--version-script=plugin/exports.map
 
 ARM_SO_CMD   = $(ARM_CXX) $(ARM_SO_FLAGS) $(ARM_SO_LINK)
 
@@ -174,7 +174,7 @@ ARM_SO_CMD   = $(ARM_CXX) $(ARM_SO_FLAGS) $(ARM_SO_LINK)
 # the .so is compiled from the same sources with the same flags plus that profile.
 # -fprofile-partial-training keeps functions the trainer never ran optimised as usual. Objects keep one
 # path (dir_name.o) in both rounds: GCC names the profile files after it. A missing profile fails the
-# build instead of quietly building without. (SubForce's.)
+# build instead of quietly building without. (SubWerk's.)
 PGO      ?= auto
 ARM_RUNS := $(if $(strip $(ARM_RUN)),$(shell command -v $(firstword $(ARM_RUN)) 2>/dev/null),native)
 PGO_ON   := $(if $(filter auto,$(PGO)),$(if $(ARM_RUNS),1,0),$(PGO))
@@ -235,11 +235,11 @@ $(ARM_BENCH): tools/bench.cpp tools/cases.h $(HDR) $(GEN)
 BENCH_ARGS ?= -s 3
 bench-device: $(ARM_SO) $(ARM_BENCH)
 	scp -q $(SSH_OPTS) $(ARM_SO) $(ARM_BENCH) $(FORCE):/tmp/
-	$(SSH) $(FORCE) 'r=0; /tmp/gfbench /tmp/grooveforce.so $(BENCH_ARGS) -c 1 || r=1; \
-		rm -f /tmp/gfbench /tmp/grooveforce.so; exit $$r'
+	$(SSH) $(FORCE) 'r=0; /tmp/gfbench /tmp/groovewerk.so $(BENCH_ARGS) -c 1 || r=1; \
+		rm -f /tmp/gfbench /tmp/groovewerk.so; exit $$r'
 
 # Exact ARM instructions per processReplacing call, without the Force (docs/PERFORMANCE.md "Instruction
-# counts"; EffectForce's bench-count): the bench with its markers (-m) runs the plain .so (no profile;
+# counts"; EffectWerk's bench-count): the bench with its markers (-m) runs the plain .so (no profile;
 # unstripped, -g, so a profile's addresses have names and lines) under a qemu-arm built with plugins, and
 # tools/gfcount.c counts every instruction between the marks. Prints every case's thousands of instructions
 # per block and its output's hashes; the whole log, with the bench's memory map, is build/arm/count/log.txt.
@@ -251,7 +251,7 @@ COUNT_ARGS ?= -s 2
 CASES      ?=
 PROF       ?=
 COUNT_DIR  := $(BUILD)/arm/count
-COUNT_SO   := $(COUNT_DIR)/grooveforce.so
+COUNT_SO   := $(COUNT_DIR)/groovewerk.so
 GFCOUNT    := $(BUILD)/libgfcount.so
 comma      := ,
 bench-count: $(COUNT_SO) $(ARM_BENCH) $(GFCOUNT)
@@ -270,7 +270,7 @@ $(GFCOUNT): tools/gfcount.c | $(BUILD)
 # Release zip: plugin + skin + sd88me's installer (stops MPC, backs up and edits MPC.settings,
 # restarts MPC). The plugin-list entry says Effect with 2 inputs: MPC lists it under insert effects.
 PLUGIN_VERSION ?= 0.0.2
-PKG      := GrooveForce-$(PLUGIN_VERSION)
+PKG      := GrooveWerk-$(PLUGIN_VERSION)
 plugin-package: $(ARM_SO) $(SKIN)
 	@# Everything shipped runs under BusyBox on the device: a CR in a script breaks it there.
 	@# grep: 1 = no CR found (good); 0 = found one; 2 = it couldn't read the scripts.
@@ -281,8 +281,8 @@ plugin-package: $(ARM_SO) $(SKIN)
 		echo "warning: this .so needs glibc $$g: it loads on MPC OS 3.x only, and the plugin catalog refuses it."; \
 		echo "         Release packages come from CI (glibc 2.31)."; fi
 	$(PY) $(MV)/tools/release.py --so $(ARM_SO) --skin "$(SKIN_DIR)" --entry $(SURF_OUT)/pluginlist-entry.xml \
-		--version $(PLUGIN_VERSION) --repo Devko/GrooveForce --license MIT \
-		--about "GrooveForce groove effect (preview): an insert effect that makes a techno groove move on MPC's beat. It pumps, shapes, echoes and bends time: a shortcut to a groove that works, not a showpiece." \
+		--version $(PLUGIN_VERSION) --repo Devko/GrooveWerk --license MIT \
+		--about "GrooveWerk groove effect (preview): an insert effect that makes a techno groove move on MPC's beat. It pumps, shapes, echoes and bends time: a shortcut to a groove that works, not a showpiece." \
 		--requires "root SSH (MockbaMod)" \
 		--user-data Presets --user-data preset_favorites.txt --user-data preset_recent.txt \
 		-o dist

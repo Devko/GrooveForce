@@ -148,7 +148,7 @@ bool tenMsFade(const Buf& in, const Buf& out, size_t start, bool up) {
 }
 
 // No click across [from, from + 0.1 s): the steepest step stays under max(0.01, 1.25 x the settled
-// steepest before and after) (EffectForce's rule for the gain modules).
+// steepest before and after) (EffectWerk's rule for the gain modules).
 bool clickFree(const Buf& out, size_t before, size_t from, size_t after) {
     const double settled = std::max(steepest(out, before, from), steepest(out, after, after + 2000));
     return steepest(out, from, from + 4410) <= std::max(0.01, 1.25 * settled);

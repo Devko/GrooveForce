@@ -26,7 +26,7 @@ int idx(const char* name) {
 float at(const char* name, double cycles) { return gf::shapeAt(idx(name), cycles); }
 bool near(double a, double b, double tol) { return std::fabs(a - b) <= tol; }
 
-// EffectForce's gate patterns (Pulse::kPatternSteps, 'x' open) without "1/16" and "Pump": the library
+// EffectWerk's gate patterns (Pulse::kPatternSteps, 'x' open) without "1/16" and "Pump": the library
 // has them as 16 steps at 1 or 0.
 struct Gate { const char* name; const char* steps; };
 constexpr Gate kGates[] = {
@@ -119,7 +119,7 @@ void shapesWaves() {      // the wave shapes at their known phases
     CHECK(rises && falls);
 }
 
-void shapesGates() {      // EffectForce's gate patterns, step by step, wherever in the cycle and in any cycle
+void shapesGates() {      // EffectWerk's gate patterns, step by step, wherever in the cycle and in any cycle
     for (const Gate& g : kGates) {
         const int s = idx(g.name);
         CHECK(gf::kShapes[s].kind == gf::ShapeKind::Steps && gf::kShapes[s].count == 16);

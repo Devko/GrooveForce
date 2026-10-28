@@ -1,4 +1,4 @@
-# The GrooveForce Probe (docs/PROBE.md): a small tempo delay that records what MPC does with an insert
+# The GrooveWerk Probe (docs/PROBE.md): a small tempo delay that records what MPC does with an insert
 # effect: MIDI into it, a button's press and release, automation played back into it. It builds on its
 # own (third_party/ apart): make -C probe <target>.
 # Builds on Linux or WSL. Native: g++ (tests). Device: arm-linux-gnueabihf-g++ 11 or newer (libstdc++
@@ -32,7 +32,7 @@ SSH      := ssh -n $(SSH_OPTS)
 MV       := ../third_party/mpc-vst-plugins
 SURF     := surface
 SURF_OUT := $(SURF)/build
-SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveForce Probe
+SKIN_DIR := $(SURF_OUT)/skin/Devko - VST - GrooveWerk Probe
 GEN      := $(SURF_OUT)/param_ids.h $(SURF)/params.json $(SURF)/layout.conf $(SURF)/vst.json
 SKIN     := $(SURF_OUT)/skin.stamp
 
@@ -44,7 +44,7 @@ INC      := -I$(SURF_OUT) -Iplugin
 # Not -ffast-math: keep isfinite() honest (the delay drops NaNs from the host with it).
 ARM_OPT  := -O3 -march=armv7-a -mtune=cortex-a17 -mfpu=neon-vfpv4 -mfloat-abi=hard \
             -funsafe-math-optimizations -fno-math-errno -fno-tree-loop-distribute-patterns
-ARM_SO   := $(BUILD)/arm/grooveforce_probe.so
+ARM_SO   := $(BUILD)/arm/groovewerk_probe.so
 
 .PHONY: all surface skin preview test test-arm arm-plugin plugin-package plugin-install plugin-uninstall \
         probe-log probe-clear latency-on latency-off clean
@@ -93,7 +93,7 @@ $(BUILD)/arm/probe_test: $(TESTS) $(wildcard test/*.h) $(SRC) $(HDR) $(GEN)
 # The .so MPC loads: only VSTPluginMain exported; --no-undefined because an unresolved symbol
 # otherwise only shows up as MPC crashing on load. A plain build: the probe isn't about speed.
 ARM_SO_FLAGS = -std=c++17 $(ARM_OPT) -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -fno-gnu-unique -Wall -Wextra -Wno-psabi -pthread $(INC)
-ARM_SO_LINK  = -shared -Wl,--no-undefined -Wl,-soname,grooveforce_probe.so -Wl,--version-script=plugin/exports.map
+ARM_SO_LINK  = -shared -Wl,--no-undefined -Wl,-soname,groovewerk_probe.so -Wl,--version-script=plugin/exports.map
 
 arm-plugin: $(ARM_SO)
 $(ARM_SO): $(SRC) $(HDR) $(GEN) plugin/exports.map
@@ -107,12 +107,12 @@ $(ARM_SO): $(SRC) $(HDR) $(GEN) plugin/exports.map
 # Package: plugin + skin + sd88me's installer (stops MPC, backs up and edits MPC.settings,
 # restarts MPC). The plugin-list entry says Effect, 2 inputs: MPC lists it under insert effects.
 PLUGIN_VERSION ?= 0.0.1
-PKG      := GrooveForce-Probe-$(PLUGIN_VERSION)
+PKG      := GrooveWerk-Probe-$(PLUGIN_VERSION)
 plugin-package: $(ARM_SO) $(SKIN)
 	@grep -l "$$(printf '\r')" $(MV)/tools/release/*; r=$$?; [ $$r -eq 1 ] || { echo "error: CRLF in a shipped script, or no scripts"; exit 1; }
 	$(PY) $(MV)/tools/release.py --so $(ARM_SO) --skin "$(SKIN_DIR)" --entry $(SURF_OUT)/pluginlist-entry.xml \
 		--version $(PLUGIN_VERSION) --license MIT \
-		--about "GrooveForce Probe: a tempo delay that logs what MPC does with an insert effect (MIDI, button press and release, automation playback, tempo, tails, bypass) to /tmp/grooveforce_probe.log." \
+		--about "GrooveWerk Probe: a tempo delay that logs what MPC does with an insert effect (MIDI, button press and release, automation playback, tempo, tails, bypass) to /tmp/groovewerk_probe.log." \
 		--requires "root SSH (MockbaMod)" -o dist
 
 # Install on a device: stops MPC, backs up + edits MPC.settings, restarts MPC. Save the MPC
@@ -133,14 +133,14 @@ plugin-uninstall: plugin-package
 
 # The probe's log on the device, and the latency test's flag (read when an instance is created).
 probe-log:
-	$(SSH) $(FORCE) 'cat /tmp/grooveforce_probe.log 2>/dev/null || echo "(no log yet)"'
+	$(SSH) $(FORCE) 'cat /tmp/groovewerk_probe.log 2>/dev/null || echo "(no log yet)"'
 # Emptied, not deleted: running instances keep the file open and would go on writing to a deleted one.
 probe-clear:
-	$(SSH) $(FORCE) ': > /tmp/grooveforce_probe.log'
+	$(SSH) $(FORCE) ': > /tmp/groovewerk_probe.log'
 latency-on:
-	$(SSH) $(FORCE) 'touch /tmp/grooveforce_probe.latency'
+	$(SSH) $(FORCE) 'touch /tmp/groovewerk_probe.latency'
 latency-off:
-	$(SSH) $(FORCE) 'rm -f /tmp/grooveforce_probe.latency'
+	$(SSH) $(FORCE) 'rm -f /tmp/groovewerk_probe.latency'
 
 $(BUILD):
 	mkdir -p $(BUILD)

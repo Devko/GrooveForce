@@ -959,7 +959,7 @@ void echoRingWorst() {   // the worst I can make of it: resonant filters in the 
 
 // --- the duck, the freeze, the offsets ------------------------------------------------------------------
 
-void echoDuck() {        // the wet ducks under the key (EffectForce's law: 1 / (1 + 16 duck env)), not under its own input
+void echoDuck() {        // the wet ducks under the key (EffectWerk's law: 1 / (1 + 16 duck env)), not under its own input
     const int n = 5 * kSr / 2;
     const Buf tone = sine(1000.0, n, 0.2f);
     // The key: silent, then 0.2 s of loud noise at 0.5 s.

@@ -1,9 +1,9 @@
 {
- "name": "GrooveForce Probe",
+ "name": "GrooveWerk Probe",
  "vendor": "Devko",
  "uid": "GfPb",
  "version": 1000,
- "so": "grooveforce_probe.so",
+ "so": "groovewerk_probe.so",
  "params": "params.json",
  "layout": "layout.conf",
  "effect": true

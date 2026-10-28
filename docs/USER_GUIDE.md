@@ -20,10 +20,10 @@
 
 1. Install it (`make plugin-install`, or the `install.sh` in the package `make plugin-package` builds;
    both stop and restart MPC, so save your project first).
-2. On a track (a kick, a bass, a hat loop, a drum bus, the master), add **GrooveForce** from the insert
+2. On a track (a kick, a bass, a hat loop, a drum bus, the master), add **GrooveWerk** from the insert
    effects.
 3. Open its screen. The **GROOVE** page shows the four parts: **Pump**, **Shape**, **Echo** and
-   **Time**. Everything starts off, and a new GrooveForce changes nothing until you turn something up.
+   **Time**. Everything starts off, and a new GrooveWerk changes nothing until you turn something up.
 4. Pick a factory preset (**PRESETS** page, or the preset stepper at the top of GROOVE), or switch a
    part on and set it up on its own page.
 
@@ -36,7 +36,7 @@ Three quick tries, to hear what each part is for:
 - **Time:** open **TIME**, switch it **ON**, set **Time Groove** to **Swing** and **Swing** to 58%.
   Every second 16th of a straight hat loop comes late, as it does when MPC swings notes.
 
-GrooveForce assumes 4/4 at about 120 to 150 BPM: a bar is four beats. Other times work, but the
+GrooveWerk assumes 4/4 at about 120 to 150 BPM: a bar is four beats. Other times work, but the
 rates, the defaults and the presets are made for techno.
 
 ## The screen
@@ -72,7 +72,7 @@ and **Move** belong to the whole plugin.
 | MOVES | the 16 tiles; **FIRING** card: MODE (One Shot or Loop), QUANTIZE (1/16, Beat or Bar), the selected Move, GO | Move, Move Mode, Move Quantize |
 | SETUP | **LEVELS** card: Input, Output, Dry Level. **PUMP AND ECHO** card: Sensitivity (the Pump's), Crossover, Echo Sens | Input, Output, Dry Level, Sensitivity, Crossover, Echo Sens |
 
-The status line at the top of every page shows what GrooveForce costs and how many parts run, for
+The status line at the top of every page shows what GrooveWerk costs and how many parts run, for
 example `CPU 3%   PEAK 5%   2 OF 4 ON`: the average and the worst block of the last half second, in
 percent of MPC's audio block, and how many of the four parts were running.
 
@@ -553,7 +553,7 @@ Move is selected, not fired: tap its tile or **GO**.
   writes `User NNN.gfp` (there is no text entry on the device), **INIT** loads Init.
 - **The preset stepper** (GROOVE page, top right) walks all presets, one per Q-Link detent.
 - Preset files live in the plugin's folder under `Presets/` and on the SSD under
-  `GrooveForce Presets/`; folders become categories. Your saved presets go to `Presets/User/`.
+  `GrooveWerk Presets/`; folders become categories. Your saved presets go to `Presets/User/`.
 
 ## Grooves by job
 
@@ -635,7 +635,7 @@ Bar** on the last beat of a phrase. The send opens for the Move and the echo rin
 
 ### Perform (the master)
 
-Put GrooveForce on the master (or on a drum bus and a music bus, one each) and keep Time on, so the
+Put GrooveWerk on the master (or on a drum bus and a music bus, one each) and keep Time on, so the
 Moves that play the past have it. A Move waits for its line: tap it in the bar before the one you
 want it in. **Move Quantize** Bar puts every Move on a downbeat; Beat (the default) puts it on a beat.
 
@@ -695,7 +695,7 @@ the echoes ring on through it.
 - **It is built not to click.** Every gain edge takes at least 1 ms and every jump is a 5 ms
   crossfade. Init passes the input bit for bit.
 - **Tails ring on through Stop.** MPC briefly suspends an insert when the transport stops;
-  GrooveForce keeps its echoes, its memory and a Move that plays through that. Switching the insert's
+  GrooveWerk keeps its echoes, its memory and a Move that plays through that. Switching the insert's
   slot **off** for longer than a quarter of a second clears them, so switching it back on never
   replays old echoes.
 - **Projects** save every sound setting, the selected Move and the preset it came from. The Move that
@@ -703,5 +703,5 @@ the echoes ring on through it.
 - **Many copies.** Put one on each track you like. Each is independent and locks to the same song
   position; a part that is off costs no CPU (but for Time's recording, once Time has been used), and the
   Echo's and Time's memory is only taken where they are used.
-- **MIDI.** GrooveForce tells MPC it takes none. Moves are played from the screen, the Q-Links and
+- **MIDI.** GrooveWerk tells MPC it takes none. Moves are played from the screen, the Q-Links and
   automation.

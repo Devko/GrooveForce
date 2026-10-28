@@ -1,9 +1,11 @@
-# GrooveForce
+# GrooveWerk
 
 **A groove for the Akai Force: an insert effect that makes a techno groove move on MPC's beat.**
 
+*Formerly GrooveForce.* <!-- werk-rename: keep -->
+
 A VST2 insert effect for MPC OS's built-in plugin host, a sibling of
-[EffectForce](https://github.com/Devko/EffectForce) and [MasterForce](https://github.com/Devko/MasterForce)
+[EffectWerk](https://github.com/Devko/EffectWerk) and [MasterWerk](https://github.com/Devko/MasterWerk)
 on the same groundwork. It pumps, shapes, echoes and bends time: a shortcut to a groove that works, not
 a showpiece. Four parts, **Pump**, **Shape**, **Echo** and **Time**, and 16 one-tap **Moves**.
 
@@ -59,12 +61,12 @@ There is no release yet. Build a package with `make plugin-package`, unzip it an
 `INSTALL.md` inside:
 
 ```sh
-scp -r GrooveForce-<version> root@<device-ip>:/tmp/
-ssh -t root@<device-ip> sh /tmp/GrooveForce-<version>/install.sh
+scp -r GrooveWerk-<version> root@<device-ip>:/tmp/
+ssh -t root@<device-ip> sh /tmp/GrooveWerk-<version>/install.sh
 ```
 
 The installer asks for confirmation, **stops MPC** (save your project first), copies the plugin,
-backs up and edits `MPC.settings`, and starts MPC again. Then put **GrooveForce** on a track's insert.
+backs up and edits `MPC.settings`, and starts MPC again. Then put **GrooveWerk** on a track's insert.
 From a checkout it is one step, with `FORCE=root@<device-ip>` on the line or in `local.mk`; it
 restarts MPC too:
 
@@ -84,7 +86,7 @@ Linux or WSL, as for the siblings (g++, `arm-linux-gnueabihf-g++` and qemu-user 
 make test                  # the parts and the plugin under ASan/UBSan
 make test-arm              # the same suite built for the Force, under qemu-arm
 make test-module M=grid    # one module's tests on their own
-make arm-plugin            # build/arm/grooveforce.so (profile-guided where qemu-arm runs)
+make arm-plugin            # build/arm/groovewerk.so (profile-guided where qemu-arm runs)
 make test-arm-pgo          # the suite against the objects that .so is linked from
 make levels                # how loud each factory preset comes out against its reference material
 make preset-levels         # sets their Output so each comes out about as loud as it went in
@@ -92,7 +94,7 @@ make bench                 # the cases of tools/cases.h timed on this machine (x
 make bench-count           # the same cases in ARM instructions per block, counted under qemu (QEMU_PLUGINS in local.mk)
 make bench-device          # the same cases timed on the Force (FORCE=root@<ip> in local.mk)
 make skin preview          # the skin, and every page as surface/build/page_*.png
-make plugin-package        # dist/GrooveForce-<version>-mpc-armv7.zip
+make plugin-package        # dist/GrooveWerk-<version>-mpc-armv7.zip
 make plugin-install        # onto the Force; restarts MPC
 ```
 
@@ -110,8 +112,13 @@ come from CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)): the
 
 ## License
 
-MIT, see [LICENSE](LICENSE). `dsp/` holds EffectForce's shared pieces (simd, fastmath, the SVF) and
-GrooveForce's own (the grid, the crossover, the Pump's curves, the shape library, the Echo, whose lines
-are EffectForce's Delay taken apart, and Time); `plugin/` and `surface/` are MasterForce's plugin layer,
-cut down and given GrooveForce's parameters and the Moves; `third_party/mpc-vst-plugins/` is sd88me's
-skin generator and installer (MIT), vendored with PolyForce's patches.
+MIT, see [LICENSE](LICENSE). `dsp/` holds EffectWerk's shared pieces (simd, fastmath, the SVF) and
+GrooveWerk's own (the grid, the crossover, the Pump's curves, the shape library, the Echo, whose lines
+are EffectWerk's Delay taken apart, and Time); `plugin/` and `surface/` are MasterWerk's plugin layer,
+cut down and given GrooveWerk's parameters and the Moves; `third_party/mpc-vst-plugins/` is sd88me's
+skin generator and installer (MIT), vendored with PolyWerk's patches.
+
+## Trademarks
+
+Not affiliated with or endorsed by inMusic Brands or Akai Professional. Akai Professional, Akai Force and MPC
+are trademarks of their respective owners.

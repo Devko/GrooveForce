@@ -60,7 +60,7 @@ inline float maxStep(const Buf& x, size_t from = 0, size_t to = 0) {
 }
 
 // The largest change between neighbouring samples in x[from..to): on a steady input, how fast a gain
-// moves (EffectForce's pulse_test.cpp). The no-click rule of the gain modules is written with it:
+// moves (EffectWerk's pulse_test.cpp). The no-click rule of the gain modules is written with it:
 // after a change, the steepest step in the next 0.1 s stays under max(0.01, 1.25 x the settled
 // steepest before and after).
 inline double steepest(const Buf& x, size_t from, size_t to) { return maxStep(x, from, to); }

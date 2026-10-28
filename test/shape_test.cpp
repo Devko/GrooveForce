@@ -40,7 +40,7 @@ double maxDiff(const Buf& a, const Buf& b, size_t from = 0, size_t to = 0) {
     for (size_t i = from; i < to; ++i) m = std::max(m, static_cast<double>(std::fabs(a[i] - b[i])));
     return m;
 }
-// The steepest change between neighbouring samples (EffectForce's helper; here it stays in this file).
+// The steepest change between neighbouring samples (EffectWerk's helper; here it stays in this file).
 double steepest(const Buf& x, size_t from = 0, size_t to = 0) { return maxStep(x, from, to); }
 
 Transport transport(double bpm, double beats, bool playing) {

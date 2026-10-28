@@ -1,9 +1,9 @@
 #pragma once
 // The slice of the VST2 ABI that MPC OS's JUCE host uses, written out by hand (no Steinberg SDK).
 // Layout and opcode values follow sd88me/mpc-vst-plugins wrapper/vst2_wrap.c (MIT, Copyright (c)
-// 2026 sd88me), which is device-verified on a Force, as in PolyForce and SubForce; the effect
+// 2026 sd88me), which is device-verified on a Force, as in PolyWerk and SubWerk; the effect
 // opcodes and host queries below are the probe's additions (VST 2.4 values), and so is the MIDI
-// event (GrooveForce's probe: effProcessEvents). On 32-bit ARM intptr_t is 4 bytes.
+// event (GrooveWerk's probe: effProcessEvents). On 32-bit ARM intptr_t is 4 bytes.
 #include <cstdint>
 
 extern "C" {

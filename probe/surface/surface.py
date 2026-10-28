@@ -13,8 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # A separate name and ID from the effect that follows: the probe uninstalls on its own and never
 # shares saved state with it.
-VST = {"name": "GrooveForce Probe", "vendor": "Devko", "uid": "GfPb", "version": 1000,
-       "so": "grooveforce_probe.so", "params": "params.json", "layout": "layout.conf", "effect": True}
+VST = {"name": "GrooveWerk Probe", "vendor": "Devko", "uid": "GfPb", "version": 1000,
+       "so": "groovewerk_probe.so", "params": "params.json", "layout": "layout.conf", "effect": True}
 
 # --- parameters ------------------------------------------------------------------------------
 # kind: readout (text the plugin writes, read only), num (real value lo..hi, linear), enum (options),
@@ -86,7 +86,7 @@ def params_json():
 
 
 # --- the page --------------------------------------------------------------------------------
-# PolyForce's look (style=td3 rounded cards on one flat colour) in GrooveForce's coral. Plugin area
+# PolyWerk's look (style=td3 rounded cards on one flat colour) in GrooveWerk's coral. Plugin area
 # 1280x628 at y = 86..714: a header row (the status line), then cards at y=158 and y=440 (h=270).
 # Nothing sits in a card's title band (y .. y+44). Page 1 is the delay and what MPC does; page 2 the
 # button and the tile, the two controls whose presses and releases the log times.

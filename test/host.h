@@ -2,7 +2,7 @@
 // A fake MPC for the insert effect: drives the plugin through its VST2 entry points the way MPC
 // does (128-frame blocks, in place, 0..1 params, the Force's taps and Q-Link detents), serves
 // transport time, and records what the plugin pushes back (audioMasterAutomate,
-// audioMasterUpdateDisplay). MasterForce's, for GrooveForce's parameters.
+// audioMasterUpdateDisplay). MasterWerk's, for GrooveWerk's parameters.
 #include "signal.h"
 #include "../plugin/vst2.h"
 #include "../plugin/groove_map.h"

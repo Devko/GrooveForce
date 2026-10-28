@@ -99,7 +99,7 @@ void basics() {
     CHECK(h.op(vst::effGetPlugCategory) == vst::kPlugCategEffect);
     char b[64] = {};
     h.op(vst::effGetEffectName, 0, 0, b);
-    CHECK(std::string(b) == "GrooveForce");
+    CHECK(std::string(b) == "GrooveWerk");
     h.op(vst::effGetVendorString, 0, 0, b);
     CHECK(std::string(b) == "Devko");
     // No MIDI until the probe says MPC sends it to an insert.
@@ -637,7 +637,7 @@ void presetsRoundTrip() {
     h.press(P_PRE_SAVE);
     // The file is the state text: a header and a line for every sound parameter, no project's own.
     const std::string saved = fileText(fixtureDir() + "/presets/User/User 001.gfp");
-    CHECK(starts(saved, "grooveforce 1\n") && has(saved, "\nswing=") && has(saved, "\nvol_shape=") && has(saved, "\nflt_cutoff="));
+    CHECK(starts(saved, "groovewerk 1\n") && has(saved, "\nswing=") && has(saved, "\nvol_shape=") && has(saved, "\nflt_cutoff="));
     CHECK(!has(saved, "preset=") && !has(saved, "status=") && !has(saved, "pre_save="));
     int lines = 0;
     for (char c : saved) lines += c == '\n';
@@ -665,7 +665,7 @@ void presetsRoundTrip() {
     CHECK(fs::exists(fixtureDir() + "/presets/User/User 002.gfp") && fileText(fixtureDir() + "/presets/User/User 001.gfp") == saved);
     // A file edited by hand: an unknown key, a wrong value and a missing parameter don't spoil the rest.
     std::ofstream(fixtureDir() + "/presets/User/User 003.gfp")
-        << "grooveforce 1\nswing=0.7\nno_such_key=5\npump_curve=Wobble\npump_rate=1 bar\nvol_depth=oops\n";
+        << "groovewerk 1\nswing=0.7\nno_such_key=5\npump_curve=Wobble\npump_rate=1 bar\nvol_depth=oops\n";
     Host g;
     g.press(P_PRESET_NEXT);   // Init -> User 001 -> User 002 -> User 003
     g.press(P_PRESET_NEXT);
@@ -945,7 +945,7 @@ void factoryPresets() {
     CHECK(factory.size() >= sizeof kPlanned / sizeof kPlanned[0]);
 }
 
-// Every factory preset stays level-matched (EffectForce's testFactory): the reference material of its category
+// Every factory preset stays level-matched (EffectWerk's testFactory): the reference material of its category
 // (tools/reference_mix.h: the kick for Kick, the bass line for Bass, the hats and the snare for Hats + Perc...) comes out
 // as loud as it went in, within 0.5 dB, as `make preset-levels` left it; a preset whose Output is at the +-9 dB cap
 // passes as near as the cap lets it and says how far short it is. It plays finite, its peaks under +6 dBFS. A change to
@@ -985,7 +985,7 @@ void projectState() {
     a.press(P_PRE_INIT);   // the project came from a preset: it remembers which
     spread(a, rng);
     const std::string chunk = a.chunk();
-    CHECK(starts(chunk, "grooveforce 1\n") && has(chunk, "\npreset=builtin:Init\n"));
+    CHECK(starts(chunk, "groovewerk 1\n") && has(chunk, "\npreset=builtin:Init\n"));
     {   // a second instance with the state is the first one
         Host b;
         CHECK(b.load(chunk) == 1);
@@ -1018,7 +1018,7 @@ void projectState() {
         CHECK(b.value(P_FLT_TYPE) == 2.0f);                     // an option that is none: as it was
         CHECK(std::fabs(b.get(P_FLT_CUTOFF) - a.get(P_FLT_CUTOFF)) < 2e-5f && b.get(P_VOL_SHAPE) == a.get(P_VOL_SHAPE));
     }
-    {   // a state written by a later version (keys we don't have, "grooveforce 2"), a text editor's byte-order mark and CRLF
+    {   // a state written by a later version (keys we don't have, "groovewerk 2"), a text editor's byte-order mark and CRLF
         std::string future = chunk;
         future[12] = '2';
         future += "echo_on=On\n";
@@ -1035,8 +1035,8 @@ void projectState() {
     {   // not ours: refused, and nothing changes
         Host b;
         const std::string before = b.chunk();
-        for (const char* junk : {"", "hello", "masterforce 1\nswing=0.7\n", "grooveforce\nswing=0.7\n", "grooveforce 0\nswing=0.7\n",
-                                 "effectforce 1\n"})
+        for (const char* junk : {"", "hello", "masterwerk 1\nswing=0.7\n", "groovewerk\nswing=0.7\n", "groovewerk 0\nswing=0.7\n",
+                                 "effectwerk 1\n"})
             CHECK(b.load(junk) == 0 && b.chunk() == before);
         CHECK(b.op(vst::effSetChunk, 0, 0, nullptr) == 0 && b.op(vst::effSetChunk, 0, 1 << 21, const_cast<char*>(chunk.c_str())) == 0);
     }

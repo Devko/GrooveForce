@@ -1,7 +1,7 @@
 #pragma once
 // Surface: what every plugin parameter does when MPC sets it, what it reads back, and what its value
-// text says. EffectForce's plugin/surface.{h,cpp} (SubForce's, PolyForce's, RackForce's, device-proven)
-// by way of MasterForce's, without its chain and scenes and without LEARN.
+// text says. EffectWerk's plugin/surface.{h,cpp} (SubWerk's, PolyWerk's, RackWerk's, device-proven)
+// by way of MasterWerk's, without its chain and scenes and without LEARN.
 //
 // Threads:
 //   UI thread      get / set / display (MPC polls these freely; they read caches)
@@ -15,7 +15,7 @@
 // is 1/128 of the range, a data-wheel click 0.01, a touch drag about 0.04, and a tile tap
 // sends a release echo ~0.7 s later. So every stepped parameter (choices, the preset stepper)
 // moves exactly one step per event in MPC's direction, and the plugin pushes the snapped value back
-// (stepIndex / stepItem below, RackForce's rules). A button tap toggles its read-back, and a button
+// (stepIndex / stepItem below, RackWerk's rules). A button tap toggles its read-back, and a button
 // always reads back 0 (it springs back): every 1 is a press, and no release ever follows.
 //
 // The Moves (R35). The Move parameter holds the selected Move and stays on it when the Move is over. A change of it, a tap
@@ -120,7 +120,7 @@ private:
     void savePreset();
     int  stepperCur(int i, const Listing& L, const std::string& key) const;   // where a stepper stands
 
-    // UI-thread-only stepping state (RackForce's).
+    // UI-thread-only stepping state (RackWerk's).
     long long lastSentMs_[P_COUNT] = {};
     float     lastN_[P_COUNT] = {};
     long long toggleMs_[P_COUNT] = {};

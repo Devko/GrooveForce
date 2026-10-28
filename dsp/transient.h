@@ -70,7 +70,7 @@ public:
 
     // Follows n samples (n <= kChunk) of the louder side; the offset of the first onset in them, or
     // -1. Two onsets are at least kHoldoffMs apart. On NEON the two envelopes are the lanes of one
-    // vector (as in EffectForce's EnvFollower: VFP has no min or max, and its compares stall on the
+    // vector (as in EffectWerk's EnvFollower: VFP has no min or max, and its compares stall on the
     // flags); the decisions are more compares of that vector, one lane read as an integer.
     int process(const float* L, const float* R, int n) {
         int first = -1;

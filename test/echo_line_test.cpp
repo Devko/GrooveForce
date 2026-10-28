@@ -953,7 +953,7 @@ void lineHold() {        // R36: feedback 1 and resonance 1: after a noise burst
     }
 }
 
-void lineDivisions() {   // the sync divisions: sorted, EffectForce's 16 and the three odd ones
+void lineDivisions() {   // the sync divisions: sorted, EffectWerk's 16 and the three odd ones
     CHECK(gf::kNumEchoDivs == 19);
     for (int i = 1; i < gf::kNumEchoDivs; ++i) CHECK(gf::kEchoDivs[i].beats > gf::kEchoDivs[i - 1].beats);
     CHECK(gf::kEchoDivs[0].beats == 0.0625 && std::strcmp(gf::kEchoDivs[0].name, "1/64") == 0);

@@ -1,6 +1,6 @@
 // A qemu-user TCG plugin for make bench-count: the exact number of ARM instructions each measured
 // processReplacing call executes (docs/PERFORMANCE.md "Instruction counts"). Every translated block
-// adds its instruction count to one counter as it runs (inline, no callback). (EffectForce's tools/efcount.c,
+// adds its instruction count to one counter as it runs (inline, no callback). (EffectWerk's tools/efcount.c,
 // renamed.) The bench (gfbench -m)
 // marks events with syscall(4000, op, arg), which no kernel has; the plugin sees it on its way in:
 //   op 0: a block starts   op 1: it ends (the instructions since op 0 are its count)

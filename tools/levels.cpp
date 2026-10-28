@@ -1,4 +1,4 @@
-// gflevels: the factory presets' levels (EffectForce's tools/levels.cpp, adapted). dlopen()s the built plugin like MPC,
+// gflevels: the factory presets' levels (EffectWerk's tools/levels.cpp, adapted). dlopen()s the built plugin like MPC,
 // plays the reference mix (tools/reference_mix.h: four bars at 120 BPM at -18 LUFS, MPC playing so the Pump and the
 // Shape run on the grid) through every preset in presets/Factory and compares the loudness out with the loudness in
 // (BS.1770 K-weighting, the whole mix, both sides). Each category is judged on the material it is made for (the kick

@@ -140,7 +140,7 @@ struct Host {
     // The probe's log (the monitor writes it every 100 ms): is `text` in it, within two seconds?
     bool logHas(const std::string& text) {
         for (int waited = 0;; waited += 20) {
-            std::ifstream f(ef::traceDir() + "/grooveforce_probe.log");
+            std::ifstream f(ef::traceDir() + "/groovewerk_probe.log");
             std::stringstream ss;
             ss << f.rdbuf();
             if (ss.str().find(text) != std::string::npos) return true;

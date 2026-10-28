@@ -11,7 +11,7 @@
 //
 // Both sides' first sections take the same input at the same cutoff, so they are one filter: its
 // low-pass output feeds the lows' second section, x - k v1 - v2 (the high-pass) the highs'. Three SVFs
-// run, not four, as EffectForce's OTT does. L and R are the two lanes of an f2.
+// run, not four, as EffectWerk's OTT does. L and R are the two lanes of an f2.
 //
 // Moving: g glides across a chunk, evenly in octaves (ef::Glide, as the SVF modules do), and a1..a3
 // follow it sample by sample while it moves, so a swept cutoff makes no click; svf.h shows why that

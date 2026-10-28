@@ -17,7 +17,7 @@ namespace {
 constexpr float kSlope = 1.0f / (0.001001f * ef::kRate);
 constexpr float kFadeStep = 1.0f / (0.010f * ef::kRate);     // a line on or off: 10 ms
 constexpr float kFreezeStep = 1.0f / (0.020f * ef::kRate);   // the freeze: 20 ms
-constexpr float kDuckLaw = 16.0f;                            // EffectForce's
+constexpr float kDuckLaw = 16.0f;                            // EffectWerk's
 constexpr float kKeyClamp = 8.0f;                            // +18 dBFS: a wild sample must not hold the wet down for long
 constexpr float kTiny = 1e-18f;
 constexpr float kInputClamp = 4.0f;                          // the most the lines take (the Echo sums before them)

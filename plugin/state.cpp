@@ -8,7 +8,7 @@
 
 namespace gf {
 namespace {
-constexpr const char* kMagic = "grooveforce ";
+constexpr const char* kMagic = "groovewerk ";
 
 bool saved(int i) { return PARAM_INFO[i].kind == Kind::Synth; }
 

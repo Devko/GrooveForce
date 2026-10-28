@@ -13,7 +13,7 @@
 //   Env     An onset in the key (the TransientDetector of Pump's Input trigger, at `sensitivity`)
 //           sets the value to 1; it then falls along an exponential that is down 60 dB (0.001) after
 //           rateBeats, at the tempo. A new hit starts it again from 1. The value is 0 until the first hit.
-//   Follow  The key's level: the louder side, one pole up in 5 ms and down in 150 ms (EffectForce's
+//   Follow  The key's level: the louder side, one pole up in 5 ms and down in 150 ms (EffectWerk's
 //           EnvFollower), times 2.14 (+6.6 dB) and cut at 1. A peak follower with that release reads
 //           a sine 0.6 dB under its peak (the ripple between the peaks), so a plain +6 dB would read a
 //           -6 dBFS sine as 0.93; 2.14 reads it as 1 (0.98 to 1.02 from 30 Hz up). Louder stays at 1.
@@ -62,7 +62,7 @@
 
 namespace gf {
 
-// EffectForce's EnvFollower: the peak of the two sides, one pole up in 5 ms and down in 150 ms. process() takes
+// EffectWerk's EnvFollower: the peak of the two sides, one pole up in 5 ms and down in 150 ms. process() takes
 // n samples of the key (null is not allowed: the caller gives silence) and returns the level at the chunk's end;
 // NaN and infinity are silence. On NEON in a vector's lanes: VFP has no min or max, and its compares stall on
 // the flags.

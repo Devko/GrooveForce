@@ -1,10 +1,10 @@
 #pragma once
 // Presets as files, plus the factory set built in.
 //
-//   *.gfp under <plugin dir>/Presets and /media/AkaiForce/GrooveForce Presets (GF_PRESET_ROOTS),
+//   *.gfp under <plugin dir>/Presets and /media/AkaiForce/GrooveWerk Presets (GF_PRESET_ROOTS),
 //   plus the factory presets (presets/Factory/<category>/, embedded at build time: one category
 //   per folder, keys "builtin:<name>"). A preset file is the plugin's own state text
-//   ("grooveforce 1" + key=value lines), so a preset and a project restore the same way. Saving
+//   ("groovewerk 1" + key=value lines), so a preset and a project restore the same way. Saving
 //   writes <first root>/User/User NNN.gfp: there is no text entry on the device, so names are
 //   numbered.
 #include "library.h"

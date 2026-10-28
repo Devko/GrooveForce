@@ -1,9 +1,9 @@
-// GrooveForce Probe: a VST2 insert effect for MPC OS (Force / MPC standalone) that answers what
-// MPC does with an effect plugin before GrooveForce is built on it (docs/PROBE.md): MIDI into an
-// insert, a button's press and release, automation played back. EffectForce's probe, extended.
+// GrooveWerk Probe: a VST2 insert effect for MPC OS (Force / MPC standalone) that answers what
+// MPC does with an effect plugin before GrooveWerk is built on it (docs/PROBE.md): MIDI into an
+// insert, a button's press and release, automation played back. EffectWerk's probe, extended.
 //
 // The sound is a tempo-synced delay (dsp/probe_delay.h), enough to hear tempo, tails, bypass and
-// latency. Everything MPC does is recorded (plugin/probe.h) and logged to /tmp/grooveforce_probe.log by
+// latency. Everything MPC does is recorded (plugin/probe.h) and logged to /tmp/groovewerk_probe.log by
 // a monitor thread; four readouts on the page show the essentials without a shell.
 //
 // Threads: processReplacing runs on one of MPC's audio workers (which one changes between calls,
@@ -77,11 +77,11 @@ double threadCpuUs() {
 
 std::atomic<int> g_instances{0};
 
-// The latency test: instances created while <trace dir>/grooveforce_probe.latency exists report 100 ms
+// The latency test: instances created while <trace dir>/groovewerk_probe.latency exists report 100 ms
 // and delay their output by as much.
 int latencyFromFlag() {
     struct stat st{};
-    return ::stat((traceDir() + "/grooveforce_probe.latency").c_str(), &st) == 0 ? kLatencyTest : 0;
+    return ::stat((traceDir() + "/groovewerk_probe.latency").c_str(), &st) == 0 ? kLatencyTest : 0;
 }
 
 struct Plugin {

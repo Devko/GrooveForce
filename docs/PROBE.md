@@ -1,7 +1,7 @@
 # The probe
 
-Before GrooveForce is built on what MPC does with an insert, the **GrooveForce Probe** finds out
-three things the [design](DESIGN.md#open) leaves open. It is EffectForce's probe (a small tempo
+Before GrooveWerk is built on what MPC does with an insert, the **GrooveWerk Probe** finds out
+three things the [design](DESIGN.md#open) leaves open. It is EffectWerk's probe (a small tempo
 delay that logs every call MPC makes) with MIDI switched on and two controls added: a button and a
 tile. It builds on its own in `probe/`. Plan 2 built Time and the Moves without waiting for the
 results (2026-10-26): Moves are One Shot and Loop, played from the tiles, GO, the Q-Links and the
@@ -25,11 +25,11 @@ From the design's Open table:
 |---|---|---|
 | Does MPC send MIDI to an insert on the Force (pads, a MIDI track)? | A probe build that says it takes MIDI and logs what arrives | Yes: Pump gets a MIDI trigger and the Move tiles can be played from pads. No: tiles, Q-Links and automation only |
 | Does a skin button give press and release, so a Move can play while held? | The same probe | Yes: Hold mode. No: One Shot and Loop only |
-| Does MPC play recorded automation back into an insert? (EffectForce's probe still has it pending) | The same probe: record the Move parameter in a sequence, play it back | Yes: Fills are sequenced by automating the Move. No: Moves are played live only, and Fills move to performance |
+| Does MPC play recorded automation back into an insert? (EffectWerk's probe still has it pending) | The same probe: record the Move parameter in a sequence, play it back | Yes: Fills are sequenced by automating the Move. No: Moves are played live only, and Fills move to performance |
 
 ## What the siblings already know
 
-From MasterForce's `plugin/surface.h`: a button always reads back 0 and **no release ever follows**
+From MasterWerk's `plugin/surface.h`: a button always reads back 0 and **no release ever follows**
 a press. A tile tap sends a **release echo about 0.7 s later**. The probe checks whether that echo's
 timing follows how long the finger stays down (a hold) or is fixed.
 
@@ -44,7 +44,7 @@ make -C probe plugin-install
 
 Then, in MPC:
 
-1. Add *GrooveForce Probe* as an insert on a drum track. Play its pads. Then play notes into the
+1. Add *GrooveWerk Probe* as an insert on a drum track. Play its pads. Then play notes into the
    same track from a MIDI track or the Force's keys.
 2. Tap Hold (second page, PRESS). Then press and hold it for about 2 s. Do the same with Tile.
 3. Record a Q-Link move of Mix into a sequence. Play it back without touching anything.
@@ -60,7 +60,7 @@ make -C probe plugin-uninstall
 
 ## Reading the log
 
-`/tmp/grooveforce_probe.log` on the device. A line starts with the wall-clock time and `#n`, the
+`/tmp/groovewerk_probe.log` on the device. A line starts with the wall-clock time and `#n`, the
 instance.
 
 | Line | Means |

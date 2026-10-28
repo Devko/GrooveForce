@@ -1,7 +1,7 @@
 #pragma once
 // The reference material and the loudness measure the factory presets are level-matched with
 // (tools/levels.cpp sets their Output) and the profile-guided build's trainer plays (tools/pgo_train.cpp).
-// From EffectForce's tools/loudness.h; here the parts are the groove's own.
+// From EffectWerk's tools/loudness.h; here the parts are the groove's own.
 //
 // The material: four bars at 120 BPM of chords (detuned saws), a bass line (square), kick, snare and
 // hats, 8 s. Each category plays what it is made for (a kick preset isn't judged on the chords, a chord

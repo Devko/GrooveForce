@@ -1,9 +1,9 @@
 {
- "name": "GrooveForce",
+ "name": "GrooveWerk",
  "vendor": "Devko",
  "uid": "GrFc",
  "version": 1000,
- "so": "grooveforce.so",
+ "so": "groovewerk.so",
  "params": "params.json",
  "layout": "layout.conf",
  "effect": true

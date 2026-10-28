@@ -1,13 +1,13 @@
-// GrooveForce as a VST2 insert effect for MPC OS (Force / MPC standalone).
+// GrooveWerk as a VST2 insert effect for MPC OS (Force / MPC standalone).
 //
 // The groove engine (plugin/engine.h) behind the touchscreen pages generated from surface/surface.py;
 // plugin/surface.* decides what every parameter does. The status line carries a CPU meter, so the
 // cost can be read on the device, and how many of the four parts (Shape, Pump, Echo, Time) are running. What MPC
-// does with an insert effect was measured first (EffectForce's docs/PROBE.md): it calls
+// does with an insert effect was measured first (EffectWerk's docs/PROBE.md): it calls
 // processReplacing nonstop in place with 128 frames, suspends and resumes on transport Stop (~100 ms)
 // and for its slot's ON button (as long as it is off), and never calls effSetBypass. A short suspend
 // keeps every state (a Pump mid-duck goes on from there, a Move goes on playing); only one over kLongSuspendMs clears
-// them. MIDI into an insert is not asked for until GrooveForce's probe says MPC sends it (docs/PROBE.md), so canDo says no.
+// them. MIDI into an insert is not asked for until GrooveWerk's probe says MPC sends it (docs/PROBE.md), so canDo says no.
 //
 // Threads: processReplacing runs on one of MPC's audio workers (which one changes between calls,
 // instances run concurrently); parameters, display text and chunks come from MPC's UI side. Host
