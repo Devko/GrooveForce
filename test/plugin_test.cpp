@@ -10,6 +10,7 @@
 // everything at once, are test/plugin_moves_test.cpp; the fixtures and the helpers the two use are in
 // test/host.h. The modules' own behaviour is in their suites.
 #include "host.h"
+#include "../plugin/paths.h"
 #include "../plugin/presets.h"
 #include "../plugin/surface.h"
 #include "factory_presets.h"
@@ -638,6 +639,10 @@ void presetsRoundTrip() {
     // The file is the state text: a header and a line for every sound parameter, no project's own.
     const std::string saved = fileText(fixtureDir() + "/presets/User/User 001.gfp");
     CHECK(starts(saved, "groovewerk 1\n") && has(saved, "\nswing=") && has(saved, "\nvol_shape=") && has(saved, "\nflt_cutoff="));
+    // A project or preset saved before the rename starts with the old header: it loads, the next save writes the new one.
+    Host old;
+    CHECK(old.load("grooveforce 1\nswing=0.7\n") == 1);   // werk-rename: keep
+    CHECK(starts(old.chunk(), "groovewerk 1\n") && has(old.chunk(), "\nswing=0.7\n"));
     CHECK(!has(saved, "preset=") && !has(saved, "status=") && !has(saved, "pre_save="));
     int lines = 0;
     for (char c : saved) lines += c == '\n';
@@ -1020,7 +1025,7 @@ void projectState() {
     }
     {   // a state written by a later version (keys we don't have, "groovewerk 2"), a text editor's byte-order mark and CRLF
         std::string future = chunk;
-        future[12] = '2';
+        future[11] = '2';   // the version digit of "groovewerk 1"
         future += "echo_on=On\n";
         Host b;
         CHECK(b.load(future) == 1 && sameSound(a, b));
@@ -1260,6 +1265,22 @@ void cleanupPluginTests() {
 
 } // namespace eft
 
+// The SSD preset folder of the old name moves to the new one, once, and never over a folder already there.
+static void testLegacyDir() {
+    std::printf("== the old SSD preset folder\n");
+    namespace fs = std::filesystem;
+    const std::string old = eft::fixtureDir() + "/legacy/old", now = eft::fixtureDir() + "/legacy/new";
+    fs::create_directories(old);
+    std::ofstream(old + "/a.sfp") << "x";
+    CHECK(gf::migrateLegacyDir(old, now) && fs::exists(now + "/a.sfp") && !fs::exists(old));   // it moves
+    fs::create_directories(old);
+    std::ofstream(old + "/b.sfp") << "y";
+    CHECK(!gf::migrateLegacyDir(old, now) && fs::exists(old + "/b.sfp") && fs::exists(now + "/a.sfp") &&
+          !fs::exists(now + "/b.sfp"));   // the new one exists: both stay as they are
+    fs::remove_all(old);
+    CHECK(!gf::migrateLegacyDir(old, now + "2") && !fs::exists(now + "2"));   // no old one: nothing happens
+}
+
 void pluginTests() {
     using namespace eft;
     setupPluginTests();
@@ -1282,5 +1303,6 @@ void pluginTests() {
     GF_RUN(suspendResume);
     GF_RUN(suspendPumping);
 
+    testLegacyDir();
     cleanupPluginTests();
 }

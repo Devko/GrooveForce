@@ -9,6 +9,7 @@
 namespace gf {
 namespace {
 constexpr const char* kMagic = "groovewerk ";
+constexpr const char* kLegacyMagic = "grooveforce ";   // werk-rename: keep (the old name's projects and presets: read, never written)
 
 bool saved(int i) { return PARAM_INFO[i].kind == Kind::Synth; }
 
@@ -67,8 +68,9 @@ int savedParam(const std::string& key) {
 
 bool isStateText(const std::string& text) {
     size_t at = text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;   // a UTF-8 byte-order mark (a text editor's)
-    if (text.compare(at, std::strlen(kMagic), kMagic) != 0) return false;
-    at += std::strlen(kMagic);
+    if (text.compare(at, std::strlen(kMagic), kMagic) == 0) at += std::strlen(kMagic);
+    else if (text.compare(at, std::strlen(kLegacyMagic), kLegacyMagic) == 0) at += std::strlen(kLegacyMagic);
+    else return false;
     int version = 0;
     const auto r = std::from_chars(text.data() + at, text.data() + text.size(), version);
     return r.ec == std::errc() && version >= 1;
